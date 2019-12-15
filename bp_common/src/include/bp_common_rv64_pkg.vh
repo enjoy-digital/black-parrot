@@ -36,6 +36,25 @@ package bp_common_rv64_pkg;
 
   typedef struct packed
   {
+    logic [rv64_reg_addr_width_gp-1:0] rs3_addr;
+    logic [1:0]                        pr;
+    logic [rv64_reg_addr_width_gp-1:0] rs2_addr;
+    logic [rv64_reg_addr_width_gp-1:0] rs1_addr;
+    logic [2:0]                        rm;
+    logic [rv64_reg_addr_width_gp-1:0] rd_addr;
+  }  rv64_instr_fma_type_s;
+
+  typedef struct packed
+  {
+    logic [rv64_funct7_width_gp-1:0]   funct7;
+    logic [rv64_reg_addr_width_gp-1:0] rs2_addr;
+    logic [rv64_reg_addr_width_gp-1:0] rs1_addr;
+    logic [2:0]                        rm;
+    logic [rv64_reg_addr_width_gp-1:0] rd_addr;
+  }  rv64_instr_ftype_s;
+
+  typedef struct packed
+  {
     logic [rv64_imm12_width_gp-1:0]    imm12;
     logic [rv64_reg_addr_width_gp-1:0] rs1;
     logic [rv64_funct3_width_gp-1:0]   funct3;
@@ -61,10 +80,12 @@ package bp_common_rv64_pkg;
   {
     union packed
     {
-      rv64_instr_rtype_s rtype;
-      rv64_instr_itype_s itype;
-      rv64_instr_stype_s stype;
-      rv64_instr_utype_s utype;
+      rv64_instr_rtype_s    rtype;
+      rv64_instr_fma_type_s fmatype;
+      rv64_instr_ftype_s    ftype;
+      rv64_instr_itype_s    itype;
+      rv64_instr_stype_s    stype;
+      rv64_instr_utype_s    utype;
     }  fields;
     logic [rv64_opcode_width_gp-1:0]   opcode;
   }  rv64_instr_s;

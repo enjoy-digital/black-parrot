@@ -112,8 +112,6 @@ logic csr_cmd_v_lo, mem1_cmd_v;
 wire unused2 = mmu_cmd_ready_i;
 wire unused3 = csr_cmd_ready_i;
 
-assign data_o = mem_resp.data;
-
 bsg_shift_reg
  #(.width_p(csr_cmd_width_lp)
    ,.stages_p(2)
@@ -128,6 +126,20 @@ bsg_shift_reg
    ,.valid_o(csr_cmd_v_lo)
    ,.data_o(csr_cmd_lo)
    );
+
+logic nanbox_lo;
+bsg_dff_chain
+ #(.width_p(1)
+   ,.num_stages_p(2)
+   )
+ nanbox_shift_reg
+  (.clk_i(clk_i)
+
+   ,.data_i(decode.frf_w_v & (decode.fu_op == e_lw))
+   ,.data_o(nanbox_lo)
+   );
+
+assign data_o = mem_resp.data | ({32{nanbox_lo}} << 32);
 
 logic [reg_data_width_lp-1:0] offset;
 

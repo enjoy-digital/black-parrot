@@ -55,7 +55,9 @@ module bp_be_csr
     , output                            translation_en_o
     , output                            mstatus_sum_o
     , output                            mstatus_mxr_o
-    
+    , output [2:0]                      frm_o
+    , input [4:0]                       fflags_i
+
     // FE Exceptions
     , output logic                      itlb_fill_o
     , output logic                      instr_page_fault_o
@@ -101,6 +103,8 @@ wire is_debug_mode = debug_mode_r;
 wire is_m_mode = is_debug_mode | (priv_mode_r == `PRIV_MODE_M);
 wire is_s_mode = (priv_mode_r == `PRIV_MODE_S);
 wire is_u_mode = (priv_mode_r == `PRIV_MODE_U);
+
+`declare_csr(fcsr)
 
 // sstatus subset of mstatus
 // sedeleg hardcoded to 0
@@ -520,6 +524,9 @@ always_comb
           // Read case, we need to read as well as write for config bus
           if (csr_cmd_v_i | cfg_bus_cast_i.csr_r_v | cfg_bus_cast_i.csr_w_v) 
             unique casez (csr_cmd.csr_addr)
+              `CSR_ADDR_FFLAGS : csr_data_lo = fcsr_lo.fflags;
+              `CSR_ADDR_FRM    : csr_data_lo = fcsr_lo.frm;
+              `CSR_ADDR_FCSR   : csr_data_lo = fcsr_lo;
               `CSR_ADDR_CYCLE  : csr_data_lo = mcycle_lo;
               // Time must be done by trapping, since we can't stall at this point
               `CSR_ADDR_INSTRET: csr_data_lo = minstret_lo;
@@ -576,6 +583,9 @@ always_comb
             endcase
           if (csr_cmd_v_i | cfg_bus_cast_i.csr_w_v) // Write case
             unique casez (csr_cmd.csr_addr)
+              `CSR_ADDR_FFLAGS : fcsr_li = '{frm: fcsr_lo.frm, fflags: csr_data_li, default: '0};
+              `CSR_ADDR_FRM    : fcsr_li = '{frm: csr_data_li, fflags: fcsr_lo.fflags, default: '0};
+              `CSR_ADDR_FCSR   : fcsr_li = csr_data_li;
               `CSR_ADDR_CYCLE  : mcycle_li = csr_data_li;
               // Time must be done by trapping, since we can't stall at this point
               `CSR_ADDR_INSTRET: minstret_li = csr_data_li;
@@ -684,6 +694,8 @@ always_comb
 assign accept_irq_o = ~is_debug_mode & (m_interrupt_icode_v_li | s_interrupt_icode_v_li);
 
 // CSR slow paths
+assign frm_o        = fcsr_lo.frm;
+assign fflags_o     = fcsr_lo.fflags;
 assign satp_ppn_o       = satp_r.ppn;
 
 assign mstatus_sum_o = mstatus_lo.sum;

@@ -79,6 +79,9 @@ module bp_be_calculator_top
 
   , output [commit_pkt_width_lp-1:0]    commit_pkt_o
   , output [wb_pkt_width_lp-1:0]        wb_pkt_o
+
+  , output [4:0]                        fflags_o
+  , input [2:0]                         frm_i
   );
 
 // Declare parameterizable structs
@@ -106,8 +109,8 @@ assign commit_pkt_o = commit_pkt;
 logic [dword_width_p-1:0] irf_rs1    , irf_rs2;
 logic [dword_width_p-1:0] frf_rs1    , frf_rs2;
 logic [dword_width_p-1:0] bypass_irs1, bypass_irs2;
-logic [dword_width_p-1:0] bypass_frs1, bypass_frs2;
-logic [dword_width_p-1:0] bypass_rs1 , bypass_rs2;
+logic [dword_width_p-1:0] bypass_frs1, bypass_frs2, bypass_frs3;
+logic [dword_width_p-1:0] bypass_rs1 , bypass_rs2, bypass_rs3;
 
 // Pipeline stage registers
 bp_be_pipe_stage_reg_s [pipe_stage_els_lp-1:0] calc_stage_r;
@@ -132,60 +135,8 @@ logic [pipe_stage_els_lp-1:1]                        comp_stage_n_slice_fwb_v;
 logic [pipe_stage_els_lp-1:1][reg_addr_width_lp-1:0] comp_stage_n_slice_rd_addr;
 logic [pipe_stage_els_lp-1:1][dword_width_p-1:0] comp_stage_n_slice_rd;
 
-if (fp_en_p)
-  begin : fp_rf
-    bp_be_bypass 
-     // Don't need to forward isd data
-     #(.fwd_els_p(pipe_stage_els_lp-1))
-     fp_bypass
-      (.id_rs1_addr_i(dispatch_pkt.instr.fields.rtype.rs1_addr)
-       ,.id_rs1_i(frf_rs1)
-    
-       ,.id_rs2_addr_i(dispatch_pkt.instr.fields.rtype.rs2_addr)
-       ,.id_rs2_i(frf_rs2)
-    
-       ,.fwd_rd_v_i(comp_stage_n_slice_fwb_v)
-       ,.fwd_rd_addr_i(comp_stage_n_slice_rd_addr)
-       ,.fwd_rd_i(comp_stage_n_slice_rd)
-    
-       ,.bypass_rs1_o(bypass_frs1)
-       ,.bypass_rs2_o(bypass_frs2)
-       );
-    
-    bsg_mux 
-     #(.width_p(dword_width_p)
-       ,.els_p(2)
-       ) 
-     bypass_xrs1_mux
-      (.data_i({bypass_frs1, bypass_irs1})
-       ,.sel_i(dispatch_pkt.frs1_v)
-       ,.data_o(bypass_rs1)
-       );
-    
-    bsg_mux 
-     #(.width_p(dword_width_p)
-       ,.els_p(2)
-       ) 
-     bypass_xrs2_mux
-      (.data_i({bypass_frs2, bypass_irs2})
-       ,.sel_i(dispatch_pkt.frs2_v)
-       ,.data_o(bypass_rs2)
-       );
-  end
-else
-  begin : no_fp_rf
-    assign frf_rs1 = '0;
-    assign frf_rs2 = '0;
-
-    assign bypass_frs1 = '0;
-    assign bypass_frs2 = '0;
-
-    assign bypass_rs1 = bypass_irs1;
-    assign bypass_rs2 = bypass_irs2;
-  end
-
 // Bypass the instruction operands from written registers in the stack
-bp_be_bypass 
+bp_be_int_bypass
  // Don't need to forward isd data
  #(.fwd_els_p(pipe_stage_els_lp-1))
  int_bypass 
@@ -219,6 +170,49 @@ bsg_dff
    ,.data_i(reservation_n)
    ,.data_o(reservation_r)
    );
+
+bp_be_fp_bypass
+ #(.fwd_els_p(pipe_stage_els_lp-1))
+ fp_bypass
+  (.id_rs1_addr_i(dispatch_pkt.instr.fields.fmatype.rs1_addr)
+   ,.id_rs1_i(dispatch_pkt.rs1)
+
+   ,.id_rs2_addr_i(dispatch_pkt.instr.fields.fmatype.rs2_addr)
+   ,.id_rs2_i(dispatch_pkt.rs2)
+
+   ,.id_rs3_addr_i(dispatch_pkt.instr.fields.fmatype.rs3_addr)
+   ,.id_rs3_i(dispatch_pkt.imm)
+
+   ,.fwd_rd_v_i(comp_stage_n_slice_fwb_v)
+   ,.fwd_rd_addr_i(comp_stage_n_slice_rd_addr)
+   ,.fwd_rd_i(comp_stage_n_slice_rd)
+
+   ,.bypass_rs1_o(bypass_frs1)
+   ,.bypass_rs2_o(bypass_frs2)
+   ,.bypass_rs3_o(bypass_frs3)
+   );
+
+bsg_mux 
+ #(.width_p(dword_width_p)
+   ,.els_p(2)
+   ) 
+ bypass_xrs1_mux
+  (.data_i({bypass_frs1, bypass_irs1})
+   ,.sel_i(dispatch_pkt.decode.frs1_v)
+   ,.data_o(bypass_rs1)
+   );
+
+bsg_mux 
+ #(.width_p(dword_width_p)
+   ,.els_p(2)
+   ) 
+ bypass_xrs2_mux
+  (.data_i({bypass_frs2, bypass_irs2})
+   ,.sel_i(dispatch_pkt.decode.frs2_v)
+   ,.data_o(bypass_rs2)
+   );
+
+assign bypass_rs3 = bypass_frs3;
 
 // Computation pipelines
 // Integer pipe: 1 cycle latency
@@ -296,7 +290,9 @@ bp_be_pipe_mem
      ,.decode_i(reservation_r.decode)
      ,.rs1_i(reservation_r.rs1)
      ,.rs2_i(reservation_r.rs2)
-  
+
+     ,.frm_i(frm_i)
+     ,.fflags_o(fflags_o)
      ,.data_o(pipe_fp_data_lo)
      );
 
@@ -449,7 +445,8 @@ assign commit_pkt.pc         = calc_stage_r[2].pc;
 assign commit_pkt.npc        = calc_stage_r[1].pc;
 assign commit_pkt.instr      = calc_stage_r[2].instr;
 
-assign wb_pkt.rd_w_v  = calc_stage_r[3].irf_w_v & ~exc_stage_r[3].poison_v;
+assign wb_pkt.fp_not_int = calc_stage_r[3].frf_w_v & ~exc_stage_r[3].poison_v;
+assign wb_pkt.rd_w_v  = (calc_stage_r[3].irf_w_v | calc_stage_r[3].frf_w_v) & ~exc_stage_r[3].poison_v;
 assign wb_pkt.rd_addr = calc_stage_r[3].instr.fields.rtype.rd_addr;
 assign wb_pkt.rd_data = comp_stage_r[3];
 

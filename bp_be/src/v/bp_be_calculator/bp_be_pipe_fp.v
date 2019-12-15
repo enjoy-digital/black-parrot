@@ -6,22 +6,6 @@
  * Description:
  *   Pipeline for RISC-V float instructions. Handles float and double computation.
  *
- * Parameters:
- *
- * Inputs:
- *   clk_i            -
- *   reset_i          -
- *
- *   decode_i         - All of the stage register information needed for a dispatched instruction
- *   rs1_i            - Source register data for the dispatched instruction
- *   rs2_i            - Source register data for the dispatched instruction
- *
- * Outputs:
- *   data_o         - The calculated result of the instruction
- *   
- * Keywords:
- *   calculator, fp, float, rvfd
- *
  * Notes:
  *
  */
@@ -43,6 +27,9 @@ module bp_be_pipe_fp
 
    // Pipeline result
    , output [reg_data_width_lp-1:0] data_o
+
+   , input [2:0]                    frm_i
+   , output [4:0]                   fflags_o
    );
 
 // Cast input and output ports 
@@ -72,5 +59,5 @@ always_comb begin
   //  else $warning("RV64FD not currently supported");
 end
 
-endmodule : bp_be_pipe_fp
+endmodule
 

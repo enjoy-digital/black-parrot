@@ -146,20 +146,42 @@ always_comb
         casez (fetch_instr.opcode)
           `RV64_JALR_OP, `RV64_LOAD_OP, `RV64_OP_IMM_OP, `RV64_OP_IMM_32_OP, `RV64_SYSTEM_OP :
             begin 
-              issue_pkt.irs1_v = '1; 
-              issue_pkt.irs2_v = '0;
+              issue_pkt.irs1_v = 1'b1; 
+              issue_pkt.irs2_v = 1'b0;
             end
           `RV64_BRANCH_OP, `RV64_STORE_OP, `RV64_OP_OP, `RV64_OP_32_OP, `RV64_AMO_OP: 
             begin 
-              issue_pkt.irs1_v = '1; 
-              issue_pkt.irs2_v = '1; 
+              issue_pkt.irs1_v = 1'b1; 
+              issue_pkt.irs2_v = 1'b1; 
             end
           default: begin end
         endcase
 
         // Decide whether to read from floating point regfile (saves power)
-        issue_pkt.frs1_v = '0;
-        issue_pkt.frs2_v = '0;
+        // NOTE: We read unnecessarily on some unary FP_OPs
+        casez (fetch_instr.opcode)
+          `RV64_FLOAD_OP:
+            begin
+              issue_pkt.irs1_v = 1'b1;
+            end
+          `RV64_FSTORE_OP:
+            begin
+              issue_pkt.irs1_v = 1'b1;
+              issue_pkt.frs2_v = 1'b1;
+            end
+          `RV64_FP_OP:
+            begin
+              issue_pkt.frs1_v = 1'b1;
+              issue_pkt.frs2_v = 1'b1;
+            end
+          `RV64_FMADD_OP, `RV64_FMSUB_OP, `RV64_FNMSUB_OP, `RV64_FNMADD_OP:
+            begin
+              issue_pkt.frs1_v = 1'b1;
+              issue_pkt.frs2_v = 1'b1;
+              issue_pkt.frs3_v = 1'b1;
+            end
+          default: begin end
+        endcase
 
         // Immediate extraction
         unique casez (fetch_instr.opcode)
@@ -169,9 +191,9 @@ always_comb
             issue_pkt.imm = `rv64_signext_j_imm(fetch_instr);
           `RV64_BRANCH_OP: 
             issue_pkt.imm = `rv64_signext_b_imm(fetch_instr);
-          `RV64_STORE_OP: 
+          `RV64_STORE_OP, `RV64_FSTORE_OP:
             issue_pkt.imm = `rv64_signext_s_imm(fetch_instr);
-          `RV64_JALR_OP, `RV64_LOAD_OP, `RV64_OP_IMM_OP, `RV64_OP_IMM_32_OP: 
+          `RV64_JALR_OP, `RV64_LOAD_OP, `RV64_OP_IMM_OP, `RV64_OP_IMM_32_OP, `RV64_FLOAD_OP:
             issue_pkt.imm = `rv64_signext_i_imm(fetch_instr);
           `RV64_SYSTEM_OP:
             issue_pkt.imm = `rv64_signext_c_imm(fetch_instr);
@@ -199,7 +221,7 @@ assign fe_queue_deq_o  = ~debug_mode_i & ~cache_miss_v_i & cmt_v_i;
 
 logic [dword_width_p-1:0] irf_rs1;
 logic [dword_width_p-1:0] irf_rs2;
-bp_be_regfile
+bp_be_int_regfile
 #(.bp_params_p(bp_params_p))
  int_regfile
   (.clk_i(clk_i)
@@ -208,7 +230,7 @@ bp_be_regfile
    ,.cfg_bus_i(cfg_bus_i)
    ,.cfg_data_o(cfg_irf_data_o)
 
-   ,.rd_w_v_i(wb_pkt.rd_w_v)
+   ,.rd_w_v_i(wb_pkt.rd_w_v & ~wb_pkt.fp_not_int)
    ,.rd_addr_i(wb_pkt.rd_addr)
    ,.rd_data_i(wb_pkt.rd_data)
 
@@ -220,6 +242,36 @@ bp_be_regfile
    ,.rs2_addr_i(issue_pkt.instr.fields.rtype.rs2_addr)
    ,.rs2_data_o(irf_rs2)
    );
+
+logic [dword_width_p-1:0] frf_rs1;
+logic [dword_width_p-1:0] frf_rs2;
+logic [dword_width_p-1:0] frf_rs3;
+bp_be_fp_regfile
+#(.bp_params_p(bp_params_p))
+fp_regfile
+ (.clk_i(clk_i)
+  ,.reset_i(reset_i)
+
+  ,.cfg_bus_i(cfg_bus_i)
+  ,.cfg_data_o()
+
+  ,.rd_w_v_i(wb_pkt.rd_w_v & wb_pkt.fp_not_int)
+  ,.rd_addr_i(wb_pkt.rd_addr)
+  ,.rd_data_i(wb_pkt.rd_data)
+
+  ,.rs1_r_v_i(issue_v & issue_pkt.frs1_v)
+  ,.rs1_addr_i(issue_pkt.instr.fields.fmatype.rs1_addr)
+  ,.rs1_data_o(frf_rs1)
+
+  ,.rs2_r_v_i(issue_v & issue_pkt.frs2_v)
+  ,.rs2_addr_i(issue_pkt.instr.fields.fmatype.rs2_addr)
+  ,.rs2_data_o(frf_rs2)
+
+  ,.rs3_r_v_i(issue_v & issue_pkt.frs3_v)
+  ,.rs3_addr_i(issue_pkt.instr.fields.fmatype.rs3_addr)
+  ,.rs3_data_o(frf_rs3)
+  );
+
 
 wire enter_debug_li = cfg_bus_cast_i.enter_debug;
 wire exit_debug_li  = cfg_bus_cast_i.exit_debug;
@@ -269,9 +321,9 @@ always_comb
                           & ~(enter_debug_li | exit_debug_li);
     dispatch_pkt.pc     = expected_npc_i;
     dispatch_pkt.instr  = issue_pkt_r.instr;
-    dispatch_pkt.rs1    = irf_rs1; // TODO: Add float forwarding
-    dispatch_pkt.rs2    = irf_rs2;
-    dispatch_pkt.imm    = issue_pkt_r.imm;
+    dispatch_pkt.rs1    = issue_pkt_r.frs1_v ? frf_rs1 : irf_rs1;
+    dispatch_pkt.rs2    = issue_pkt_r.frs2_v ? frf_rs2 : irf_rs2;
+    dispatch_pkt.imm    = issue_pkt_r.frs3_v ? frf_rs3 : issue_pkt_r.imm;
     dispatch_pkt.decode = decoded;
   end
 assign dispatch_pkt_o = dispatch_pkt;

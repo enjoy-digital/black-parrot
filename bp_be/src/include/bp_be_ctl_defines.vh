@@ -137,7 +137,9 @@ typedef struct packed
   logic                             csr_r_v;
   logic                             csr_v;
   logic                             serial_v;
-  logic                             fp_not_int_v;
+  logic                             frs1_v;
+  logic                             frs2_v;
+  logic                             frs3_v;
   logic                             jmp_v;
   logic                             br_v;
   logic                             opw_v;

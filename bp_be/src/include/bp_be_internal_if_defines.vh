@@ -25,6 +25,7 @@
     logic                                    irs2_v;                                               \
     logic                                    frs1_v;                                               \
     logic                                    frs2_v;                                               \
+    logic                                    frs3_v;                                               \
     logic [rv64_reg_data_width_gp-1:0]       imm;                                                  \
    } bp_be_issue_pkt_s;                                                                            \
                                                                                                    \
@@ -137,6 +138,7 @@
                                                                                                    \
   typedef struct packed                                                                            \
   {                                                                                                \
+    logic                        fp_not_int;                                                       \
     logic                        rd_w_v;                                                           \
     logic [reg_addr_width_p-1:0] rd_addr;                                                          \
     logic [dword_width_p-1:0]    rd_data;                                                          \
@@ -153,7 +155,7 @@
    + $bits(bp_fe_exception_code_e)                                                                 \
    + branch_metadata_fwd_width_mp                                                                  \
    + rv64_instr_width_gp                                                                           \
-   + 6                                                                                             \
+   + 7                                                                                             \
    + rv64_reg_data_width_gp                                                                        \
    )                                                                                               
 
@@ -194,7 +196,7 @@
   (2 * vaddr_width_mp + rv64_priv_width_gp + 6)
 
 `define bp_be_wb_pkt_width(vaddr_width_mp) \
-  (1                                                                                               \
+  (2                                                                                               \
    + reg_addr_width_p                                                                              \
    + dword_width_p                                                                                 \
    )

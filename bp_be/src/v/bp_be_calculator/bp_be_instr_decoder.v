@@ -72,7 +72,9 @@ always_comb
     decode.serial_v      = '0;
 
     // Decode metadata
-    decode.fp_not_int_v  = '0;
+    decode.frs1_v        = '0;
+    decode.frs2_v        = '0;
+    decode.frs3_v        = '0;
     decode.jmp_v         = '0;
     decode.br_v          = '0;
     decode.opw_v         = '0;
@@ -184,33 +186,39 @@ always_comb
           decode.baddr_sel  = e_baddr_is_pc;
           decode.result_sel = e_result_from_alu;
         end
-      `RV64_LOAD_OP : 
+      `RV64_LOAD_OP, `RV64_FLOAD_OP : 
         begin
           decode.pipe_mem_v = 1'b1;
-          decode.irf_w_v    = 1'b1;
+          decode.irf_w_v    = (instr.opcode == `RV64_LOAD_OP);
+          decode.frf_w_v    = (instr.opcode == `RV64_FLOAD_OP);
           decode.dcache_r_v = 1'b1;
           decode.mem_v      = 1'b1;
           unique casez (instr)
             `RV64_LB : decode.fu_op = e_lb;
             `RV64_LH : decode.fu_op = e_lh;
-            `RV64_LW : decode.fu_op = e_lw;
+            `RV64_LW, `RV64_FL_W : 
+                       decode.fu_op = e_lw;
             `RV64_LBU: decode.fu_op = e_lbu;
             `RV64_LHU: decode.fu_op = e_lhu;
             `RV64_LWU: decode.fu_op = e_lwu;
-            `RV64_LD : decode.fu_op = e_ld;
+            `RV64_LD, `RV64_FL_D : 
+                       decode.fu_op = e_ld;
             default : illegal_instr = 1'b1;
           endcase
         end
-      `RV64_STORE_OP : 
+      `RV64_STORE_OP, `RV64_FSTORE_OP : 
         begin
           decode.pipe_mem_v = 1'b1;
           decode.dcache_w_v = 1'b1;
           decode.mem_v      = 1'b1;
+          decode.frs2_v     = (instr.opcode == `RV64_FSTORE_OP);
           unique casez (instr)
             `RV64_SB : decode.fu_op = e_sb;
             `RV64_SH : decode.fu_op = e_sh;
-            `RV64_SW : decode.fu_op = e_sw;
-            `RV64_SD : decode.fu_op = e_sd;
+            `RV64_SW, `RV64_FS_W :
+                       decode.fu_op = e_sw;
+            `RV64_SD, `RV64_FS_D :
+                       decode.fu_op = e_sd;
             default : illegal_instr = 1'b1;
           endcase
         end

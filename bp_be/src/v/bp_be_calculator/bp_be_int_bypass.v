@@ -10,7 +10,7 @@
  * 
  */
 
-module bp_be_bypass
+module bp_be_int_bypass
  import bp_common_rv64_pkg::*;
  #(parameter fwd_els_p = "inv"
 
@@ -137,4 +137,5 @@ always_comb
       end
   end
 
-endmodule : bp_be_bypass
+endmodule
+

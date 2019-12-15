@@ -14,6 +14,7 @@ include $(BP_EXTERNAL_DIR)/Makefile.tools
 
 update_libs:
 	cd $(TOP); git submodule update --init --recursive $(BP_EXTERNAL_DIR)/basejump_stl
+	cd $(TOP); git submodule update --init --recursive $(BP_EXTERNAL_DIR)/HardFloat
 
 update_tests:
 	cd $(TOP); git submodule update --init --recursive $(BP_COMMON_DIR)/test
