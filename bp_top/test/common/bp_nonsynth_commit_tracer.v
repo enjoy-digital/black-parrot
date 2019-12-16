@@ -51,22 +51,25 @@ always_ff @(negedge clk_i)
      ,.count_o(itag_cnt)
      );
 
-  logic                     commit_v_r;
-  logic [vaddr_width_p-1:0] commit_pc_r;
-  logic [instr_width_p-1:0] commit_instr_r;
-  bsg_dff
-   #(.width_p(1+vaddr_width_p+instr_width_p))
-   commit__reg
-    (.clk_i(clk_i)
-     ,.data_i({commit_v_i, commit_pc_i, commit_instr_i})
-     ,.data_o({commit_v_r, commit_pc_r, commit_instr_r})
-     );
+  logic                     commit_v_r, commit_v_rr;
+  logic [vaddr_width_p-1:0] commit_pc_r, commit_pc_rr;
+  logic [instr_width_p-1:0] commit_instr_r, commit_instr_rr;
+  always_ff @(posedge clk_i)
+    begin
+      commit_v_r     <= commit_v_i;
+      commit_pc_r    <= commit_pc_i;
+      commit_instr_r <= commit_instr_i;
+
+      commit_v_rr     <= commit_v_r;
+      commit_pc_rr    <= commit_pc_r;
+      commit_instr_rr <= commit_instr_r;
+    end
 
   always_ff @(negedge clk_i)
     // TODO: For some reason, we're getting 0 PC/instr pairs. Either to do with nops or exceptions
-    if (commit_v_r & commit_pc_r != '0)
+    if (commit_v_rr & commit_pc_rr != '0)
       begin
-        $fwrite(file, "%x %x %x %x ", mhartid_i, commit_pc_r, commit_instr_r, itag_cnt);
+        $fwrite(file, "%x %x %x %x ", mhartid_i, commit_pc_rr, commit_instr_rr, itag_cnt);
         if (rd_w_v_i)
           $fwrite(file, "%x %x", rd_addr_i, rd_data_i);
         $fwrite(file, "\n");

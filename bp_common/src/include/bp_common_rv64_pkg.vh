@@ -90,5 +90,56 @@ package bp_common_rv64_pkg;
     logic [rv64_opcode_width_gp-1:0]   opcode;
   }  rv64_instr_s;
 
+  typedef enum logic [2:0]
+  {
+    e_rne   = 3'b000
+    ,e_rtz  = 3'b001
+    ,e_rdn  = 3'b010
+    ,e_rup  = 3'b011
+    ,e_rmm  = 3'b100
+    // 3'b101, 3'b110 reserved
+    ,e_dyn  = 3'b111
+  } rv64_frm_e;
+
+  typedef struct packed
+  {
+    // Invalid operation
+    logic nv;
+    // Divide by zero
+    logic dz;
+    // Overflow
+    logic of;
+    // Underflow
+    logic uf;
+    // Inexact
+    logic nx;
+  }  rv64_fflags_s;
+
+  typedef struct packed
+  {
+    // Invalid operation
+    logic nv;
+    // Overflow
+    logic of;
+    // Inexact
+    logic nx;
+  }  rv64_iflags_s;
+
+  typedef struct packed
+  {
+    logic [53:0] padding;
+    logic        q_nan;
+    logic        sig_nan;
+    logic        p_inf;
+    logic        p_norm;
+    logic        p_sub;
+    logic        p_zero;
+    logic        n_zero;
+    logic        n_sub;
+    logic        n_norm;
+    logic        n_inf;
+  }  rv64_fclass_s;
+
+
 endpackage
 

@@ -1,7 +1,11 @@
 
 module bp_be_hardfloat_fpu
+ import bp_common_pkg::*;
+ import bp_common_rv64_pkg::*;
+ import bp_be_pkg::*;
  import bp_be_hardfloat_pkg::*;
- #(parameter dword_width_p      = 64
+ #(parameter latency_p          = 4 // Used for retiming
+   , parameter dword_width_p    = 64
    , parameter word_width_p     = 32
    , parameter sp_exp_width_lp  = 8
    , parameter sp_sig_width_lp  = 24
@@ -20,13 +24,13 @@ module bp_be_hardfloat_fpu
    , input [dword_width_p-1:0]  b_i
    , input [dword_width_p-1:0]  c_i
 
-   , input bsg_fp_op_e          op_i
-   , input bsg_fp_pr_e          ipr_i
-   , input bsg_fp_pr_e          opr_i
-   , input bsg_fp_rm_e          rm_i
+   , input bp_be_fp_fu_op_e       op_i
+   , input bp_be_fp_pr_e          ipr_i
+   , input bp_be_fp_pr_e          opr_i
+   , input rv64_frm_e             rm_i
 
-   , output [dword_width_p-1:0] o
-   , output bsg_fp_eflags_s     eflags_o
+   , output logic [dword_width_p-1:0] o
+   , output rv64_fflags_s             eflags_o
    );
 
   // The control bits control tininess, which is fixed in RISC-V
@@ -89,7 +93,7 @@ module bp_be_hardfloat_fpu
   // FADD/FSUB
   //
   logic [dp_rec_width_lp-1:0] faddsub_lo;
-  bsg_fp_eflags_s faddsub_eflags_lo;
+  rv64_fflags_s faddsub_eflags_lo;
 
   wire is_fsub_li = (op_i == e_op_fsub);
   addRecFN
@@ -109,7 +113,7 @@ module bp_be_hardfloat_fpu
   // FMUL
   //
   logic [dp_rec_width_lp-1:0] fmul_lo;
-  bsg_fp_eflags_s fmul_eflags_lo;
+  rv64_fflags_s fmul_eflags_lo;
 
   wire is_fmul_li = (op_i == e_op_fmul);
   mulRecFN
@@ -128,7 +132,7 @@ module bp_be_hardfloat_fpu
   // FMIN/FMAX/FEQ/FLT/FLE
   //
   logic [dp_rec_width_lp-1:0] fcompare_lo;
-  bsg_fp_eflags_s fcompare_eflags_lo;
+  rv64_fflags_s fcompare_eflags_lo;
 
   logic flt_lo, feq_lo, fgt_lo, unordered_lo;
   wire is_flt_li  = (op_i == e_op_flt);
@@ -166,7 +170,7 @@ module bp_be_hardfloat_fpu
   // F[N]MADD/F[N]MSUB
   //
   logic [dp_rec_width_lp-1:0] fma_lo;
-  bsg_fp_eflags_s fma_eflags_lo;
+  rv64_fflags_s fma_eflags_lo;
 
   wire is_fmadd_li  = (op_i == e_op_fnmadd);
   wire is_fmsub_li  = (op_i == e_op_fmsub);
@@ -197,10 +201,10 @@ module bp_be_hardfloat_fpu
   // FCVT
   //
   logic [dp_rec_width_lp-1:0] fcvt_lo;
-  bsg_fp_eflags_s f2i_eflags_lo;
+  rv64_fflags_s f2i_eflags_lo;
 
   logic [dword_width_p-1:0] f2dw_lo;
-  bsg_int_eflags_s f2dw_int_eflags_lo;
+  rv64_iflags_s f2dw_int_eflags_lo;
   wire is_f2iu = (op_i == e_op_f2iu);
   recFNToIN
    #(.expWidth(dp_exp_width_lp)
@@ -217,7 +221,7 @@ module bp_be_hardfloat_fpu
      );
 
   logic [word_width_p-1:0] f2w_lo;
-  bsg_int_eflags_s f2w_int_eflags_lo;
+  rv64_iflags_s f2w_int_eflags_lo;
   recFNToIN
    #(.expWidth(dp_exp_width_lp)
      ,.sigWidth(dp_sig_width_lp)
@@ -239,7 +243,7 @@ module bp_be_hardfloat_fpu
     : '{nv: f2w_int_eflags_lo.nv  | f2w_int_eflags_lo.of , nx: f2w_int_eflags_lo.nx , default: '0};
 
   logic [dp_rec_width_lp-1:0] i2f_lo;
-  bsg_fp_eflags_s i2f_eflags_lo;
+  rv64_fflags_s i2f_eflags_lo;
   wire is_iu2f = (op_i == e_op_iu2f);
   wire [dword_width_p-1:0] a_sext_li = (ipr_i == e_pr_double) 
     ? a_i 
@@ -261,7 +265,7 @@ module bp_be_hardfloat_fpu
   // FSGNJ/FSGNJN/FSGNJX
   //
   logic [dp_rec_width_lp-1:0] fsgn_lo;
-  bsg_fp_eflags_s fsgn_eflags_lo;
+  rv64_fflags_s fsgn_eflags_lo;
 
   logic sgn_li;
   always_comb
@@ -277,7 +281,7 @@ module bp_be_hardfloat_fpu
   // FCLASS
   //
   rv64_fclass_s fclass_lo;
-  bsg_fp_eflags_s fclass_eflags_lo;
+  rv64_fflags_s fclass_eflags_lo;
 
   logic is_nan_lo, is_inf_lo, is_zero_lo, is_sub_lo;
   logic sgn_lo;
@@ -327,7 +331,7 @@ module bp_be_hardfloat_fpu
   //
   logic [dp_rec_width_lp-1:0] rec_result_lo;
   logic [dword_width_p-1:0] fp_result_lo, direct_result_lo;
-  bsg_fp_eflags_s eflags_lo;
+  rv64_fflags_s eflags_lo;
   always_comb
     begin
       rec_result_lo    = '0;
@@ -402,9 +406,17 @@ module bp_be_hardfloat_fpu
      ,.out(fp_result_lo)
      );
 
-  // Select the final result
-  assign o        = is_direct_result ? direct_result_lo : fp_result_lo;
-  assign eflags_o = eflags_lo;
+  wire [dword_width_p-1:0] result_lo = is_direct_result ? direct_result_lo : fp_result_lo;
+  bsg_dff_chain
+   #(.width_p($bits(rv64_fflags_s)+dword_width_p)
+     ,.num_stages_p(latency_p-1)
+     )
+   retimer_chain
+    (.clk_i(clk_i)
+
+     ,.data_i({eflags_lo, result_lo})
+     ,.data_o({eflags_o, o})
+     );
 
 endmodule
 

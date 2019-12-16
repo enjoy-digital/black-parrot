@@ -288,6 +288,44 @@ always_comb
             default : illegal_instr = 1'b1;
           endcase
         end
+      `RV64_FP_OP:
+        begin
+          decode.pipe_fp_v = 1'b1;
+          decode.frf_w_v = 1'b1;
+          unique casez (instr)
+            `RV64_FMV_WX, `RV64_FMV_DX:
+              begin
+                decode.fu_op = e_op_pass;
+                // Half precision
+              end
+            `RV64_FMV_XW, `RV64_FMV_XD:
+              begin
+                decode.fu_op = e_op_pass;
+                decode.frf_w_v = 1'b0;
+                decode.irf_w_v = 1'b1;
+              end
+            `RV64_FADD_S, `RV64_FADD_D:
+              begin
+                decode.fu_op = e_op_fadd;
+              end
+            `RV64_FSUB_S, `RV64_FSUB_D:
+              begin
+                decode.fu_op = e_op_fsub;
+              end
+            `RV64_FSGNJ_S, `RV64_FSGNJ_D:
+              begin
+                decode.fu_op = e_op_fsgnj;
+              end
+            `RV64_FSGNJN_S, `RV64_FSGNJN_D:
+              begin
+                decode.fu_op = e_op_fsgnjn;
+              end
+            `RV64_FSGNJX_S, `RV64_FSGNJX_D:
+              begin
+                decode.fu_op = e_op_fsgnjx;
+              end
+          endcase
+        end
       default : illegal_instr = 1'b1;
     endcase
 

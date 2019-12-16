@@ -26,8 +26,6 @@ module bp_be_scheduler
    , localparam dispatch_pkt_width_lp = `bp_be_dispatch_pkt_width(vaddr_width_p)
    , localparam isd_status_width_lp = `bp_be_isd_status_width(vaddr_width_p, branch_metadata_fwd_width_p)
    , localparam wb_pkt_width_lp     = `bp_be_wb_pkt_width(vaddr_width_p)
-
-   , localparam fp_en_p = 0
    )
   (input                               clk_i
    , input                             reset_i

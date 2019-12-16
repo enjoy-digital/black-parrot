@@ -113,12 +113,14 @@ logic [dword_width_p-1:0] bypass_frs1, bypass_frs2, bypass_frs3;
 logic [dword_width_p-1:0] bypass_rs1 , bypass_rs2, bypass_rs3;
 
 // Pipeline stage registers
-bp_be_pipe_stage_reg_s [pipe_stage_els_lp-1:0] calc_stage_r;
 bp_be_pipe_stage_reg_s                         calc_stage_isd;
-bp_be_exception_s      [pipe_stage_els_lp-1:0] exc_stage_r;
+bp_be_pipe_stage_reg_s [pipe_stage_els_lp  :0] calc_stage_n;
+bp_be_pipe_stage_reg_s [pipe_stage_els_lp-1:0] calc_stage_r;
 bp_be_exception_s      [pipe_stage_els_lp  :0] exc_stage_n;
+bp_be_exception_s      [pipe_stage_els_lp-1:0] exc_stage_r;
 
-logic [pipe_stage_els_lp-1:0][dword_width_p-1:0] comp_stage_r, comp_stage_n;
+logic [pipe_stage_els_lp  :0][dword_width_p-1:0] comp_stage_n;
+logic [pipe_stage_els_lp-1:0][dword_width_p-1:0] comp_stage_r;
 
 logic [dword_width_p-1:0] pipe_nop_data_lo;
 logic [dword_width_p-1:0] pipe_int_data_lo, pipe_mul_data_lo, pipe_mem_data_lo, pipe_fp_data_lo;
@@ -130,15 +132,14 @@ logic pipe_mem_exc_v_lo, pipe_mem_miss_v_lo;
 logic [vaddr_width_p-1:0] br_tgt_int1;
 
 // Forwarding information
-logic [pipe_stage_els_lp-1:1]                        comp_stage_n_slice_iwb_v;
-logic [pipe_stage_els_lp-1:1]                        comp_stage_n_slice_fwb_v;
-logic [pipe_stage_els_lp-1:1][reg_addr_width_lp-1:0] comp_stage_n_slice_rd_addr;
-logic [pipe_stage_els_lp-1:1][dword_width_p-1:0] comp_stage_n_slice_rd;
+logic [pipe_stage_els_lp:1]                        comp_stage_n_slice_iwb_v;
+logic [pipe_stage_els_lp:1]                        comp_stage_n_slice_fwb_v;
+logic [pipe_stage_els_lp:1][reg_addr_width_lp-1:0] comp_stage_n_slice_rd_addr;
+logic [pipe_stage_els_lp:1][dword_width_p-1:0] comp_stage_n_slice_rd;
 
 // Bypass the instruction operands from written registers in the stack
 bp_be_int_bypass
- // Don't need to forward isd data
- #(.fwd_els_p(pipe_stage_els_lp-1))
+ #(.fwd_els_p(pipe_stage_els_lp))
  int_bypass 
   (.id_rs1_addr_i(dispatch_pkt.instr.fields.rtype.rs1_addr)
    ,.id_rs1_i(dispatch_pkt.rs1)
@@ -172,7 +173,7 @@ bsg_dff
    );
 
 bp_be_fp_bypass
- #(.fwd_els_p(pipe_stage_els_lp-1))
+ #(.fwd_els_p(pipe_stage_els_lp))
  fp_bypass
   (.id_rs1_addr_i(dispatch_pkt.instr.fields.fmatype.rs1_addr)
    ,.id_rs1_i(dispatch_pkt.rs1)
@@ -287,9 +288,11 @@ bp_be_pipe_mem
     (.clk_i(clk_i)
      ,.reset_i(reset_i)
   
+     ,.instr_i(reservation_r.instr)
      ,.decode_i(reservation_r.decode)
      ,.rs1_i(reservation_r.rs1)
      ,.rs2_i(reservation_r.rs2)
+     ,.rs3_i(reservation_r.imm)
 
      ,.frm_i(frm_i)
      ,.fflags_o(fflags_o)
@@ -298,11 +301,12 @@ bp_be_pipe_mem
 
 // Execution pipelines
 // Shift in dispatch pkt and move everything else down the pipe
+assign calc_stage_n = {calc_stage_r[0+:pipe_stage_els_lp], calc_stage_isd};
 bsg_dff
  #(.width_p(pipe_stage_reg_width_lp*pipe_stage_els_lp))
  calc_stage_reg
   (.clk_i(clk_i)
-   ,.data_i({calc_stage_r[0+:pipe_stage_els_lp-1], calc_stage_isd})
+   ,.data_i(calc_stage_n[0+:pipe_stage_els_lp])
    ,.data_o(calc_stage_r)
    );
 
@@ -316,17 +320,17 @@ assign pipe_int_data_lo_v = calc_stage_r[0].pipe_int_v;
 
 assign pipe_nop_data_lo = '0;
 
-logic [pipe_stage_els_lp-1:0][dword_width_p-1:0] comp_stage_mux_li;
-logic [pipe_stage_els_lp-1:0]                        comp_stage_mux_sel_li;
+logic [pipe_stage_els_lp:0][dword_width_p-1:0] comp_stage_mux_li;
+logic [pipe_stage_els_lp:0]                    comp_stage_mux_sel_li;
 
-assign comp_stage_mux_li = {pipe_fp_data_lo, pipe_mem_data_lo, pipe_mul_data_lo, pipe_int_data_lo, pipe_nop_data_lo};
-assign comp_stage_mux_sel_li = {pipe_fp_data_lo_v, pipe_mem_data_lo_v, pipe_mul_data_lo_v, pipe_int_data_lo_v, 1'b1};
+assign comp_stage_mux_li = {pipe_nop_data_lo, pipe_fp_data_lo, pipe_mem_data_lo, pipe_mul_data_lo, pipe_int_data_lo, pipe_nop_data_lo};
+assign comp_stage_mux_sel_li = {1'b0, pipe_fp_data_lo_v, pipe_mem_data_lo_v, pipe_mul_data_lo_v, pipe_int_data_lo_v, 1'b1};
 bsg_mux_segmented 
- #(.segments_p(pipe_stage_els_lp)
+ #(.segments_p(pipe_stage_els_lp+1)
    ,.segment_width_p(dword_width_p)
    ) 
  comp_stage_mux
-  (.data0_i({comp_stage_r[0+:pipe_stage_els_lp-1], dword_width_p'(0)})
+  (.data0_i({comp_stage_r[0+:pipe_stage_els_lp], dword_width_p'(0)})
    ,.data1_i(comp_stage_mux_li)
    ,.sel_i(comp_stage_mux_sel_li)
    ,.data_o(comp_stage_n)
@@ -337,7 +341,7 @@ bsg_dff
    ) 
  comp_stage_reg 
   (.clk_i(clk_i)
-   ,.data_i(comp_stage_n)
+   ,.data_i(comp_stage_n[0+:pipe_stage_els_lp])
    ,.data_o(comp_stage_r)
    );
 
@@ -400,11 +404,11 @@ always_comb
       end
 
     // Slicing the completion pipe for Forwarding information
-    for (integer i = 1; i < pipe_stage_els_lp; i++) 
+    for (integer i = 1; i <= pipe_stage_els_lp; i++) 
       begin : comp_stage_slice
-        comp_stage_n_slice_iwb_v[i]   = calc_stage_r[i-1].irf_w_v & ~exc_stage_n[i].poison_v; 
-        comp_stage_n_slice_fwb_v[i]   = calc_stage_r[i-1].frf_w_v & ~exc_stage_n[i].poison_v; 
-        comp_stage_n_slice_rd_addr[i] = calc_stage_r[i-1].instr.fields.rtype.rd_addr;
+        comp_stage_n_slice_iwb_v[i]   = calc_stage_n[i].irf_w_v & ~exc_stage_n[i].poison_v; 
+        comp_stage_n_slice_fwb_v[i]   = calc_stage_n[i].frf_w_v & ~exc_stage_n[i].poison_v; 
+        comp_stage_n_slice_rd_addr[i] = calc_stage_n[i].instr.fields.rtype.rd_addr;
 
         comp_stage_n_slice_rd[i]      = comp_stage_n[i];
       end
@@ -413,7 +417,7 @@ always_comb
 always_comb 
   begin
     // Exception aggregation
-    for (integer i = 0; i < pipe_stage_els_lp; i++) 
+    for (integer i = 0; i <= pipe_stage_els_lp; i++) 
       begin : exc_stage
         // Normally, shift down in the pipe
         exc_stage_n[i] = (i == 0) ? '0 : exc_stage_r[i-1];
@@ -445,10 +449,15 @@ assign commit_pkt.pc         = calc_stage_r[2].pc;
 assign commit_pkt.npc        = calc_stage_r[1].pc;
 assign commit_pkt.instr      = calc_stage_r[2].instr;
 
-assign wb_pkt.fp_not_int = calc_stage_r[3].frf_w_v & ~exc_stage_r[3].poison_v;
-assign wb_pkt.rd_w_v  = (calc_stage_r[3].irf_w_v | calc_stage_r[3].frf_w_v) & ~exc_stage_r[3].poison_v;
-assign wb_pkt.rd_addr = calc_stage_r[3].instr.fields.rtype.rd_addr;
-assign wb_pkt.rd_data = comp_stage_r[3];
+assign wb_pkt.fp_not_int = calc_stage_r[4].frf_w_v & ~exc_stage_r[4].poison_v;
+assign wb_pkt.rd_w_v  = (calc_stage_r[4].irf_w_v | calc_stage_r[4].frf_w_v) & ~exc_stage_r[4].poison_v;
+assign wb_pkt.rd_addr = calc_stage_r[4].instr.fields.rtype.rd_addr;
+assign wb_pkt.rd_data = comp_stage_r[4];
+
+//assign wb_pkt.fp_not_int = calc_stage_r[3].frf_w_v & ~exc_stage_r[3].poison_v;
+//assign wb_pkt.rd_w_v  = (calc_stage_r[3].irf_w_v | calc_stage_r[3].frf_w_v) & ~exc_stage_r[3].poison_v;
+//assign wb_pkt.rd_addr = calc_stage_r[3].instr.fields.rtype.rd_addr;
+//assign wb_pkt.rd_data = comp_stage_r[3];
 
 endmodule
 

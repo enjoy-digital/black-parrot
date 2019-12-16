@@ -175,6 +175,7 @@
 `define RV64_FMAX_D     `rv64_r_type(`RV64_FP_OP,3'b001,7'b0010101)
 `define RV64_FCVT_SD    32'b0100000_00001_?????_???_?????_1010011
 `define RV64_FCVT_DS    32'b0100001_00000_?????_???_?????_1010011
+`define RV64_FMV_DX     32'b1111001_00000_?????_000_?????_1010011
 `define RV64_FEQ_D      `rv64_r_type(`RV64_FP_OP,3'b010,7'b1010001)
 `define RV64_FLT_D      `rv64_r_type(`RV64_FP_OP,3'b001,7'b1010001)
 `define RV64_FLE_D      `rv64_r_type(`RV64_FP_OP,3'b000,7'b1010001)
