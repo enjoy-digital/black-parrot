@@ -55,6 +55,8 @@ module bp_be_csr
     , output                            translation_en_o
     , output                            mstatus_sum_o
     , output                            mstatus_mxr_o
+
+    , input                             fflags_w_v_i
     , output [2:0]                      frm_o
     , input [4:0]                       fflags_i
 
@@ -347,6 +349,8 @@ always_comb
     minstret_li      = mcountinhibit_lo.ir ? minstret_lo + dword_width_p'(instret_i) : minstret_lo;
     mcountinhibit_li = mcountinhibit_lo;
 
+    fcsr_li = fcsr_lo;
+
     dcsr_li = dcsr_lo;
     dpc_li  = dpc_lo;
 
@@ -634,6 +638,11 @@ always_comb
               default: illegal_instr_o = 1'b1;
             endcase
         end
+
+    if (fflags_w_v_i)
+      begin
+        fcsr_li.fflags |= fflags_i;
+      end
 
     mip_li.mtip = timer_irq_i;
     mip_li.msip = software_irq_i;

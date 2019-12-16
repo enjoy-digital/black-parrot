@@ -41,13 +41,24 @@ module bp_be_hardfloat_fpu
   //   We also convert from 32 bit inputs to 64 bit recoded inputs. 
   //     This double rounding behavior was formally proved correct in
   //     "Innocuous Double Rounding of Basic Arithmetic Operations" by Pierre Roux
+  logic [dword_width_p-1:0] a_li, b_li, c_li;
   logic [dp_rec_width_lp-1:0] a_rec_li, b_rec_li, c_rec_li;
   logic [2:0][sp_width_lp-1:0] in_sp_li;
   logic [2:0][dp_width_lp-1:0] in_dp_li;
   logic [2:0][dp_rec_width_lp-1:0] in_rec_li;
 
-  assign in_sp_li = {c_i[0+:sp_width_lp], b_i[0+:sp_width_lp], a_i[0+:sp_width_lp]};
-  assign in_dp_li = {c_i, b_i, a_i};
+  // NaN boxing
+  //
+  localparam [dp_width_lp-1:0] dp_canonical = 64'h7ff80000_00000000;
+  localparam [dp_width_lp-1:0] sp_canonical = 64'hffffffff_7fc00000;
+  wire a_valid = (ipr_i == e_pr_double) | &a_i[sp_width_lp+:sp_width_lp];
+  wire b_valid = (ipr_i == e_pr_double) | &b_i[sp_width_lp+:sp_width_lp];
+  wire c_valid = (ipr_i == e_pr_double) | &c_i[sp_width_lp+:sp_width_lp];
+  assign a_li = a_valid ? a_i : sp_canonical;
+  assign b_li = b_valid ? b_i : sp_canonical;
+  assign c_li = c_valid ? c_i : sp_canonical;
+  assign in_sp_li = {c_li[0+:sp_width_lp], b_li[0+:sp_width_lp], a_li[0+:sp_width_lp]};
+  assign in_dp_li = {c_li, b_li, a_li};
   for (genvar i = 0; i < 3; i++)
     begin : in_rec
       logic [sp_rec_width_lp-1:0] in_sp_rec_li;
@@ -89,7 +100,70 @@ module bp_be_hardfloat_fpu
       assign in_rec_li[i] = (ipr_i == e_pr_double) ? in_dp_rec_li : in_sp2dp_rec_li;
     end
   assign {c_rec_li, b_rec_li, a_rec_li} = in_rec_li;
+
+  // Generate auxiliary information
+  //
  
+  logic a_is_nan_lo, a_is_inf_lo, a_is_zero_lo, a_is_sub_lo;
+  logic a_sgn_lo;
+  logic [dp_exp_width_lp+1:0] a_exp_lo;
+  logic [dp_sig_width_lp:0] a_sig_lo;
+
+  recFNToRawFN
+   #(.expWidth(dp_exp_width_lp)
+     ,.sigWidth(dp_sig_width_lp)
+     )
+   aclass
+    (.in(a_rec_li)
+     ,.isNaN(a_is_nan_lo)
+     ,.isInf(a_is_inf_lo)
+     ,.isZero(a_is_zero_lo)
+     ,.sign(a_sgn_lo)
+     ,.sExp(a_exp_lo)
+     ,.sig(a_sig_lo)
+     );
+  assign a_is_sub_lo = (a_li[dp_width_lp-2-:dp_exp_width_lp] == '0) && (a_li[0+:dp_sig_width_lp]);
+
+  logic a_is_sig_nan_lo;
+  isSigNaNRecFN
+   #(.expWidth(dp_exp_width_lp)
+     ,.sigWidth(dp_sig_width_lp)
+     )
+   a_fnan
+    (.in(a_rec_li)
+     ,.isSigNaN(a_is_sig_nan_lo)
+     );
+
+  logic b_is_nan_lo, b_is_inf_lo, b_is_zero_lo, b_is_sub_lo;
+  logic b_sgn_lo;
+  logic [dp_exp_width_lp+1:0] b_exp_lo;
+  logic [dp_sig_width_lp:0] b_sig_lo;
+
+  recFNToRawFN
+   #(.expWidth(dp_exp_width_lp)
+     ,.sigWidth(dp_sig_width_lp)
+     )
+   bclass
+    (.in(b_rec_li)
+     ,.isNaN(b_is_nan_lo)
+     ,.isInf(b_is_inf_lo)
+     ,.isZero(b_is_zero_lo)
+     ,.sign(b_sgn_lo)
+     ,.sExp(b_exp_lo)
+     ,.sig(b_sig_lo)
+     );
+  assign b_is_sub_lo = (b_li[dp_width_lp-2-:dp_exp_width_lp] == '0) && (b_li[0+:dp_sig_width_lp]);
+
+  logic b_is_sig_nan_lo;
+  isSigNaNRecFN
+   #(.expWidth(dp_exp_width_lp)
+     ,.sigWidth(dp_sig_width_lp)
+     )
+   b_fnan
+    (.in(b_rec_li)
+     ,.isSigNaN(b_is_sig_nan_lo)
+     );
+
   // FADD/FSUB
   //
   logic [dp_rec_width_lp-1:0] faddsub_lo;
@@ -134,6 +208,9 @@ module bp_be_hardfloat_fpu
   logic [dp_rec_width_lp-1:0] fcompare_lo;
   rv64_fflags_s fcompare_eflags_lo;
 
+  logic [dp_width_lp-1:0] fminmax_lo;
+  rv64_fflags_s fminmax_eflags_lo;
+
   logic flt_lo, feq_lo, fgt_lo, unordered_lo;
   wire is_flt_li  = (op_i == e_op_flt);
   wire is_fle_li  = (op_i == e_op_fle);
@@ -153,19 +230,39 @@ module bp_be_hardfloat_fpu
      ,.unordered(unordered_lo)
      ,.exceptionFlags(fcompare_eflags_lo)
      );
-  wire [dp_rec_width_lp-1:0] fmin_lo =  flt_lo ? a_rec_li : b_rec_li;
-  wire [dp_rec_width_lp-1:0] fmax_lo =  fgt_lo ? a_rec_li : b_rec_li;
-  wire [dp_rec_width_lp-1:0] fle_lo  = ~fgt_lo ? a_rec_li : b_rec_li;
+  wire [dp_rec_width_lp-1:0] fle_lo  = ~fgt_lo;
+
+  assign fminmax_eflags_lo = '{nv : (a_is_sig_nan_lo | b_is_sig_nan_lo), default: '0};
 
   always_comb
-    unique case (op_i)
-      e_op_fmin: fcompare_lo = fmin_lo;
-      e_op_fmax: fcompare_lo = fmax_lo;
-      e_op_feq : fcompare_lo = dp_rec_width_lp'(feq_lo);
-      e_op_flt : fcompare_lo = dp_rec_width_lp'(flt_lo);
-      e_op_fle : fcompare_lo = dp_rec_width_lp'(fle_lo);
-      default : fcompare_lo = '0;
-    endcase
+    begin
+      fminmax_lo = '0;
+      fcompare_lo = '0;
+      unique case (op_i)
+        e_op_fmin: fminmax_lo = (a_is_nan_lo & b_is_nan_lo)
+                                 ? (opr_i == e_pr_single) ? sp_canonical : dp_canonical
+                                 : (~a_is_nan_lo & b_is_nan_lo)
+                                   ? a_li
+                                   : (a_is_nan_lo & ~b_is_nan_lo)
+                                     ? b_li
+                                     : (flt_lo | (a_sgn_lo & ~b_sgn_lo))
+                                       ? a_li
+                                       : b_li;
+        e_op_fmax: fminmax_lo = (a_is_nan_lo & b_is_nan_lo)
+                                 ? (opr_i == e_pr_single) ? sp_canonical : dp_canonical
+                                 : (~a_is_nan_lo & b_is_nan_lo)
+                                   ? a_li
+                                   : (a_is_nan_lo & ~b_is_nan_lo)
+                                     ? b_li
+                                     : (fgt_lo | (~a_sgn_lo & b_sgn_lo))
+                                       ? a_li
+                                       : b_li;
+        e_op_feq : fcompare_lo = dp_rec_width_lp'(~unordered_lo & feq_lo);
+        e_op_flt : fcompare_lo = dp_rec_width_lp'(~unordered_lo & flt_lo);
+        e_op_fle : fcompare_lo = dp_rec_width_lp'(~unordered_lo & fle_lo);
+        default : begin end
+      endcase
+    end
 
   // F[N]MADD/F[N]MSUB
   //
@@ -246,8 +343,10 @@ module bp_be_hardfloat_fpu
   rv64_fflags_s i2f_eflags_lo;
   wire is_iu2f = (op_i == e_op_iu2f);
   wire [dword_width_p-1:0] a_sext_li = (ipr_i == e_pr_double) 
-    ? a_i 
-    : dword_width_p'($signed(a_i[0+:word_width_p]));
+    ? a_i
+    : is_iu2f
+      ? dword_width_p'($unsigned(a_i[0+:word_width_p]))
+      : dword_width_p'($signed(a_i[0+:word_width_p]));
   iNToRecFN
    #(.intWidth(dword_width_p)
      ,.expWidth(dp_exp_width_lp)
@@ -264,79 +363,66 @@ module bp_be_hardfloat_fpu
 
   // FSGNJ/FSGNJN/FSGNJX
   //
-  logic [dp_rec_width_lp-1:0] fsgn_lo;
+  logic [dp_width_lp-1:0] fsgn_lo;
   rv64_fflags_s fsgn_eflags_lo;
 
   logic sgn_li;
   always_comb
-    unique case (op_i)
-      e_op_fsgnj : sgn_li =  b_rec_li[dp_width_lp-1];
-      e_op_fsgnjn: sgn_li = ~b_rec_li[dp_width_lp-1];
-      e_op_fsgnjx: sgn_li =  b_rec_li[dp_width_lp-1] ^ a_rec_li[dp_width_lp-1];
-      default    : sgn_li = '0;
-    endcase
-  assign fsgn_lo = {sgn_li, a_rec_li[0+:dp_rec_width_lp-1]};
+    if (opr_i == e_pr_double)
+      unique case (op_i)
+        e_op_fsgnj:  sgn_li =  b_li[dp_width_lp-1];
+        e_op_fsgnjn: sgn_li = ~b_li[dp_width_lp-1];
+        e_op_fsgnjx: sgn_li =  b_li[dp_width_lp-1] ^ a_li[dp_width_lp-1];
+        default : sgn_li = '0;
+      endcase
+    else
+      unique case (op_i)
+        e_op_fsgnj:  sgn_li =  b_li[sp_width_lp-1];
+        e_op_fsgnjn: sgn_li = ~b_li[sp_width_lp-1];
+        e_op_fsgnjx: sgn_li =  b_li[sp_width_lp-1] ^ a_li[sp_width_lp-1];
+        default : sgn_li = '0;
+      endcase
+
+  // Inject sign into double precision or valid single precision
+  // Do not inject into auto-nonboxed
+  assign fsgn_lo = (opr_i == e_pr_double) 
+                   ? {sgn_li, a_li[0+:dp_width_lp-1]}
+                   : {32'hffffffff, sgn_li, a_li[0+:sp_width_lp-1]};
+                   //: a_valid
+                   //  ? {32'hffffffff, sgn_li, a_li[0+:sp_width_lp-1]}
+                   //  : sp_canonical;
   assign fsgn_eflags_lo = '0;
+  
 
   // FCLASS
   //
   rv64_fclass_s fclass_lo;
   rv64_fflags_s fclass_eflags_lo;
 
-  logic is_nan_lo, is_inf_lo, is_zero_lo, is_sub_lo;
-  logic sgn_lo;
-  logic [dp_exp_width_lp+1:0] exp_lo;
-  logic [dp_sig_width_lp:0] sig_lo;
-
-  recFNToRawFN
-   #(.expWidth(dp_exp_width_lp)
-     ,.sigWidth(dp_sig_width_lp)
-     )
-   fclass
-    (.in(a_rec_li)
-     ,.isNaN(is_nan_lo)
-     ,.isInf(is_inf_lo)
-     ,.isZero(is_zero_lo)
-     ,.sign(sgn_lo)
-     ,.sExp(exp_lo)
-     ,.sig(sig_lo)
-     );
-  assign is_sub_lo = (exp_lo == '0) && (sig_lo != '0);
-
-  logic is_sig_nan_lo;
-  isSigNaNRecFN
-   #(.expWidth(dp_exp_width_lp)
-     ,.sigWidth(dp_sig_width_lp)
-     )
-   fnan
-    (.in(a_rec_li)
-     ,.isSigNaN(is_sig_nan_lo)
-     );
-
   assign fclass_lo = '{padding : '0
-                       ,q_nan  :  is_nan_lo & ~is_sig_nan_lo
-                       ,sig_nan:  is_nan_lo &  is_sig_nan_lo
-                       ,p_inf  : ~sgn_lo    &  is_inf_lo
-                       ,p_norm : ~sgn_lo    & ~is_sub_lo 
-                       ,p_sub  : ~sgn_lo    &  is_sub_lo
-                       ,p_zero : ~sgn_lo    &  is_zero_lo
-                       ,n_zero :  sgn_lo    &  is_zero_lo
-                       ,n_sub  :  sgn_lo    &  is_sub_lo
-                       ,n_norm :  sgn_lo    & ~is_sub_lo
-                       ,n_inf  :  sgn_lo    & ~is_inf_lo
+                       ,q_nan  :  a_is_nan_lo & ~a_is_sig_nan_lo
+                       ,sig_nan:  a_is_nan_lo &  a_is_sig_nan_lo
+                       ,p_inf  : ~a_sgn_lo    &  a_is_inf_lo
+                       ,p_norm : ~a_sgn_lo    & ~a_is_sub_lo & ~a_is_inf_lo & ~a_is_zero_lo & ~a_is_nan_lo
+                       ,p_sub  : ~a_sgn_lo    &  a_is_sub_lo
+                       ,p_zero : ~a_sgn_lo    &  a_is_zero_lo
+                       ,n_zero :  a_sgn_lo    &  a_is_zero_lo
+                       ,n_sub  :  a_sgn_lo    &  a_is_sub_lo
+                       ,n_norm :  a_sgn_lo    & ~a_is_sub_lo & ~a_is_inf_lo & ~a_is_zero_lo & ~a_is_nan_lo
+                       ,n_inf  :  a_sgn_lo    &  a_is_inf_lo
                        };
   assign fclass_eflags_lo = '0;
 
   // Recoded result selection
   //
   logic [dp_rec_width_lp-1:0] rec_result_lo;
-  logic [dword_width_p-1:0] fp_result_lo, direct_result_lo;
+  logic [dword_width_p-1:0] direct_result_lo;
   rv64_fflags_s eflags_lo;
   always_comb
     begin
       rec_result_lo    = '0;
-      eflags_lo        = '0;
       direct_result_lo = '0;
+      eflags_lo        = '0;
       unique case (op_i)
         e_op_fmadd, e_op_fmsub, e_op_fnmsub, e_op_fnmadd:
           begin
@@ -353,15 +439,20 @@ module bp_be_hardfloat_fpu
             rec_result_lo = fmul_lo;
             eflags_lo     = fmul_eflags_lo;
           end
+        e_op_f2f:
+          begin
+            rec_result_lo = a_rec_li;
+            eflags_lo     = '0;
+          end
         e_op_fsgnj, e_op_fsgnjn, e_op_fsgnjx:
           begin
-            rec_result_lo = fsgn_lo;
-            eflags_lo     = fsgn_eflags_lo;
+            direct_result_lo = fsgn_lo;
+            eflags_lo        = fsgn_eflags_lo;
           end
         e_op_fmin, e_op_fmax:
           begin
-            rec_result_lo = fcompare_lo;
-            eflags_lo     = fcompare_eflags_lo;
+            direct_result_lo = fminmax_lo;
+            eflags_lo        = fminmax_eflags_lo;
           end
         e_op_i2f, e_op_iu2f:
           begin
@@ -370,7 +461,7 @@ module bp_be_hardfloat_fpu
           end
         e_op_feq, e_op_flt, e_op_fle:
           begin
-            direct_result_lo = fcompare_lo[0+:dword_width_p];
+            direct_result_lo = fcompare_lo[0];
             eflags_lo        = fcompare_eflags_lo;
           end
         e_op_fclass:
@@ -378,14 +469,32 @@ module bp_be_hardfloat_fpu
             direct_result_lo = fclass_lo;
             eflags_lo        = '0;
           end
-        e_op_f2i, e_op_f2iu:
+        e_op_f2i:
           begin
-            direct_result_lo = f2i_lo;
+            direct_result_lo = (opr_i == e_pr_single)
+                               ? dword_width_p'($signed(f2i_lo[0+:word_width_p]))
+                               : f2i_lo;
             eflags_lo        = f2i_eflags_lo;
           end
-        e_op_pass:
+        e_op_f2iu:
           begin
-            direct_result_lo = a_i;
+            direct_result_lo = (opr_i == e_pr_single)
+                               ? dword_width_p'($signed(f2i_lo[0+:word_width_p]))
+                               : f2i_lo;
+            eflags_lo        = f2i_eflags_lo;
+          end
+        e_op_fmvi:
+          begin
+            direct_result_lo = (opr_i == e_pr_single)
+                               ? dword_width_p'($signed(a_i[0+:word_width_p]))
+                               : a_li;
+            eflags_lo        = '0;
+          end
+        e_op_imvf:
+          begin
+            direct_result_lo = (opr_i == e_pr_single)
+                               ? {32'hffffffff, a_sext_li[0+:word_width_p]}
+                               : a_sext_li;
             eflags_lo        = '0;
           end
         default: begin end
@@ -393,18 +502,68 @@ module bp_be_hardfloat_fpu
     end
 
   wire is_direct_result = 
-      (op_i inside {e_op_f2i, e_op_f2iu, e_op_feq, e_op_flt, e_op_fle, e_op_fclass, e_op_pass});
+      (op_i inside {e_op_f2i, e_op_f2iu, e_op_fsgnj, e_op_fsgnjn, e_op_fsgnjx, e_op_feq, e_op_flt, e_op_fle, e_op_fclass, e_op_fmin, e_op_fmax, e_op_fmvi, e_op_imvf});
 
-  // Un-recode the result
+  // Classify the result
   //
+  logic result_nan_lo;
+  recFNToRawFN
+   #(.expWidth(dp_exp_width_lp)
+     ,.sigWidth(dp_sig_width_lp)
+     )
+   fclass_result
+    (.in(rec_result_lo)
+     ,.isNaN(result_nan_lo)
+     ,.isInf()
+     ,.isZero()
+     ,.sign()
+     ,.sExp()
+     ,.sig()
+     );
+
+  logic [sp_rec_width_lp-1:0] rec_result_dp2sp_lo;
+  recFNToRecFN
+   #(.inExpWidth(dp_exp_width_lp)
+     ,.inSigWidth(dp_sig_width_lp)
+     ,.outExpWidth(sp_exp_width_lp)
+     ,.outSigWidth(sp_sig_width_lp)
+     )
+   rec_sp_to_dp
+    (.control(control_li)
+     ,.in(rec_result_lo)
+     ,.roundingMode(rm_i)
+     ,.out(rec_result_dp2sp_lo)
+     // Exception flags should be raised by downstream operations
+     ,.exceptionFlags()
+     );
+
+  // Un-recode the results
+  //
+  logic [dword_width_p-1:0] raw_dp_result_lo;
+  logic [dword_width_p-1:0] final_dp_result_lo;
   recFNToFN
    #(.expWidth(dp_exp_width_lp)
      ,.sigWidth(dp_sig_width_lp)
      )
-   out_rec
+   out_dp_rec
     (.in(rec_result_lo)
-     ,.out(fp_result_lo)
+     ,.out(raw_dp_result_lo)
      );
+  assign final_dp_result_lo = result_nan_lo ? dp_canonical : raw_dp_result_lo;
+
+  logic [word_width_p-1:0] raw_sp_result_lo;
+  logic [dword_width_p-1:0] final_sp_result_lo;
+  recFNToFN
+   #(.expWidth(sp_exp_width_lp)
+     ,.sigWidth(sp_sig_width_lp)
+     )
+   out_sp_rec
+    (.in(rec_result_dp2sp_lo)
+     ,.out(raw_sp_result_lo)
+     );
+  assign final_sp_result_lo = result_nan_lo ? sp_canonical : {32'hffffffff, raw_sp_result_lo};
+
+  wire [dp_width_lp-1:0] fp_result_lo = (opr_i == e_pr_double) ? final_dp_result_lo : final_sp_result_lo;
 
   wire [dword_width_p-1:0] result_lo = is_direct_result ? direct_result_lo : fp_result_lo;
   bsg_dff_chain

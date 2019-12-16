@@ -78,6 +78,8 @@ always_comb
     decode.jmp_v         = '0;
     decode.br_v          = '0;
     decode.opw_v         = '0;
+    decode.ipr           = bp_be_fp_pr_e'(0);
+    decode.opr           = bp_be_fp_pr_e'(0);
 
     // Decode control signals
     decode.fu_op         = bp_be_fu_op_s'(0);
@@ -288,42 +290,185 @@ always_comb
             default : illegal_instr = 1'b1;
           endcase
         end
+      `RV64_FMADD_OP:
+        begin
+          decode.pipe_fp_v = 1'b1;
+          decode.frf_w_v = 1'b1;
+          decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.frs1_v = 1'b1;
+          decode.frs2_v = 1'b1;
+          decode.frs3_v = 1'b1;
+          decode.fu_op = e_op_fmadd;
+        end
+      `RV64_FMSUB_OP:
+        begin
+          decode.pipe_fp_v = 1'b1;
+          decode.frf_w_v = 1'b1;
+          decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.frs1_v = 1'b1;
+          decode.frs2_v = 1'b1;
+          decode.frs3_v = 1'b1;
+          decode.fu_op = e_op_fmsub;
+        end
+      `RV64_FNMSUB_OP:
+        begin
+          decode.pipe_fp_v = 1'b1;
+          decode.frf_w_v = 1'b1;
+          decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.frs1_v = 1'b1;
+          decode.frs2_v = 1'b1;
+          decode.frs3_v = 1'b1;
+          decode.fu_op = e_op_fnmsub;
+        end
+      `RV64_FNMADD_OP:
+        begin
+          decode.pipe_fp_v = 1'b1;
+          decode.frf_w_v = 1'b1;
+          decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.frs1_v = 1'b1;
+          decode.frs2_v = 1'b1;
+          decode.frs3_v = 1'b1;
+          decode.fu_op = e_op_fnmadd;
+        end
       `RV64_FP_OP:
         begin
           decode.pipe_fp_v = 1'b1;
           decode.frf_w_v = 1'b1;
+          decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
           unique casez (instr)
-            `RV64_FMV_WX, `RV64_FMV_DX:
-              begin
-                decode.fu_op = e_op_pass;
-                // Half precision
-              end
-            `RV64_FMV_XW, `RV64_FMV_XD:
-              begin
-                decode.fu_op = e_op_pass;
-                decode.frf_w_v = 1'b0;
-                decode.irf_w_v = 1'b1;
-              end
             `RV64_FADD_S, `RV64_FADD_D:
               begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
                 decode.fu_op = e_op_fadd;
               end
             `RV64_FSUB_S, `RV64_FSUB_D:
               begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
                 decode.fu_op = e_op_fsub;
+              end
+            `RV64_FMUL_S, `RV64_FMUL_D:
+              begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_fmul;
               end
             `RV64_FSGNJ_S, `RV64_FSGNJ_D:
               begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
                 decode.fu_op = e_op_fsgnj;
               end
             `RV64_FSGNJN_S, `RV64_FSGNJN_D:
               begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
                 decode.fu_op = e_op_fsgnjn;
               end
             `RV64_FSGNJX_S, `RV64_FSGNJX_D:
               begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
                 decode.fu_op = e_op_fsgnjx;
               end
+            `RV64_FMIN_S, `RV64_FMIN_D:
+              begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_fmin;
+              end
+            `RV64_FMAX_S, `RV64_FMAX_D:
+              begin
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_fmax;
+              end
+            `RV64_FCVT_WS, `RV64_FCVT_WD, `RV64_FCVT_LS, `RV64_FCVT_LD:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.fu_op = e_op_f2i;
+                decode.ipr = instr inside {`RV64_FCVT_WD, `RV64_FCVT_LD} ? e_pr_double : e_pr_single;
+                decode.opr = instr inside {`RV64_FCVT_LS, `RV64_FCVT_LD} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FCVT_WUS, `RV64_FCVT_WUD, `RV64_FCVT_LUS, `RV64_FCVT_LUD:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.fu_op = e_op_f2iu;
+                decode.ipr = instr inside {`RV64_FCVT_WUD, `RV64_FCVT_LUD} ? e_pr_double : e_pr_single;
+                decode.opr = instr inside {`RV64_FCVT_LUS, `RV64_FCVT_LUD} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FMV_XW, `RV64_FMV_XD:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v  = 1'b1;
+                decode.fu_op = e_op_fmvi;
+                decode.opr = instr inside {`RV64_FMV_XD} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FEQ_S, `RV64_FEQ_D:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_feq;
+              end
+            `RV64_FLT_S, `RV64_FLT_D:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_flt;
+              end
+            `RV64_FLE_S, `RV64_FLE_D:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.frs2_v = 1'b1;
+                decode.fu_op = e_op_fle;
+              end
+            `RV64_FCLASS_S, `RV64_FCLASS_D:
+              begin
+                decode.irf_w_v = 1'b1;
+                decode.frf_w_v = 1'b0;
+                decode.frs1_v = 1'b1;
+                decode.fu_op = e_op_fclass;
+              end
+            `RV64_FCVT_SW, `RV64_FCVT_DW, `RV64_FCVT_SL, `RV64_FCVT_DL:
+              begin
+                decode.fu_op = e_op_i2f;
+                decode.ipr = instr inside {`RV64_FCVT_SL, `RV64_FCVT_DL} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FCVT_SWU, `RV64_FCVT_DWU, `RV64_FCVT_SLU, `RV64_FCVT_DLU:
+              begin
+                decode.fu_op = e_op_iu2f;
+                decode.ipr = instr inside {`RV64_FCVT_SLU, `RV64_FCVT_DLU} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FCVT_SD, `RV64_FCVT_DS:
+              begin
+                decode.frs1_v = 1'b1;
+                decode.fu_op = e_op_f2f;
+                decode.ipr = instr inside {`RV64_FCVT_SD} ? e_pr_double : e_pr_single;
+                decode.opr = instr inside {`RV64_FCVT_DS} ? e_pr_double : e_pr_single;
+              end
+            `RV64_FMV_WX, `RV64_FMV_DX:
+              begin
+                decode.fu_op = e_op_imvf;
+                decode.ipr = instr inside {`RV64_FMV_DX} ? e_pr_double : e_pr_single;
+              end
+            default : illegal_instr = 1'b1;
           endcase
         end
       default : illegal_instr = 1'b1;

@@ -4,7 +4,7 @@ import sys
 class SpikeLogEntry:
   def __init__(self, string_entry):
     instr_string = string_entry.split('\n')[0].replace(':','').split()
-    commit_string = string_entry.split('\n')[1].replace('x ', 'x').split()
+    commit_string = string_entry.split('\n')[1].replace('x ', 'x').replace('f ', 'f').split()
 
     self.core = int(instr_string[0], 16)
     self.pc = int(instr_string[1], 16)
@@ -14,7 +14,7 @@ class SpikeLogEntry:
     if len(commit_string) > 0:
       self.priv = int(commit_string[0], 16)
     if len(commit_string) > 3 and "mem" not in commit_string:
-      self.rd_addr = int(commit_string[3].replace('x',''), 10)
+      self.rd_addr = int(commit_string[3].replace('x','').replace('f',''), 10)
       self.rf_instr = (self.rd_addr > 0)
     else:
       self.rf_instr = False

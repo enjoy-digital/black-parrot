@@ -22,9 +22,6 @@ module bp_be_calculator_top
     `declare_bp_fe_be_if_widths(vaddr_width_p, paddr_width_p, asid_width_p, branch_metadata_fwd_width_p)
     `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, dword_width_p, cce_block_width_p)
 
-   // Default parameters
-   , parameter fp_en_p                  = 0
-
    // Generated parameters
    , localparam cfg_bus_width_lp       = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
    , localparam calc_status_width_lp    = `bp_be_calc_status_width(vaddr_width_p)
@@ -80,7 +77,6 @@ module bp_be_calculator_top
   , output [commit_pkt_width_lp-1:0]    commit_pkt_o
   , output [wb_pkt_width_lp-1:0]        wb_pkt_o
 
-  , output [4:0]                        fflags_o
   , input [2:0]                         frm_i
   );
 
@@ -283,6 +279,7 @@ bp_be_pipe_mem
    );
 
   // Floating point pipe: 4 cycle latency
+  rv64_fflags_s fflags_lo;
   bp_be_pipe_fp 
    pipe_fp
     (.clk_i(clk_i)
@@ -295,7 +292,7 @@ bp_be_pipe_mem
      ,.rs3_i(reservation_r.imm)
 
      ,.frm_i(frm_i)
-     ,.fflags_o(fflags_o)
+     ,.fflags_o(fflags_lo)
      ,.data_o(pipe_fp_data_lo)
      );
 
@@ -395,6 +392,9 @@ always_comb
         calc_status.dep_status[i].mem_fwb_v = calc_stage_r[i].pipe_mem_v 
                                               & ~exc_stage_n[i+1].poison_v
                                               & calc_stage_r[i].frf_w_v;
+        calc_status.dep_status[i].fp_iwb_v  = calc_stage_r[i].pipe_fp_v  
+                                              & ~exc_stage_n[i+1].poison_v
+                                              & calc_stage_r[i].irf_w_v;
         calc_status.dep_status[i].fp_fwb_v  = calc_stage_r[i].pipe_fp_v  
                                               & ~exc_stage_n[i+1].poison_v
                                               & calc_stage_r[i].frf_w_v;
@@ -449,7 +449,14 @@ assign commit_pkt.pc         = calc_stage_r[2].pc;
 assign commit_pkt.npc        = calc_stage_r[1].pc;
 assign commit_pkt.instr      = calc_stage_r[2].instr;
 
+// Delay fflags 1 cycle until writeback
+rv64_fflags_s fflags_r;
+always_ff @(posedge clk_i)
+  fflags_r <= fflags_lo;
+
 assign wb_pkt.fp_not_int = calc_stage_r[4].frf_w_v & ~exc_stage_r[4].poison_v;
+assign wb_pkt.fflags_w_v = calc_stage_r[4].pipe_fp_v;
+assign wb_pkt.fflags = fflags_r;
 assign wb_pkt.rd_w_v  = (calc_stage_r[4].irf_w_v | calc_stage_r[4].frf_w_v) & ~exc_stage_r[4].poison_v;
 assign wb_pkt.rd_addr = calc_stage_r[4].instr.fields.rtype.rd_addr;
 assign wb_pkt.rd_data = comp_stage_r[4];

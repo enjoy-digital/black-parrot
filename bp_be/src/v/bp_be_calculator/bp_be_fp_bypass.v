@@ -144,7 +144,6 @@ always_comb
         // Dispatched data always matches the dispatched data, otherwise check for:
         //   * Register address match 
         //   * The completing instruction is writing and the dispatched instruction is reading
-        //   * Do not forward x0 data, RISC-V defines this as always 0
         rs1_match_vector[i] = ((i == bypass_els_lp-1)
                                || ((id_rs1_addr_i == fwd_rd_addr_i[i])
                                    & fwd_rd_v_i[i]
@@ -157,7 +156,7 @@ always_comb
                                    )
                                );
         rs3_match_vector[i] = ((i == bypass_els_lp-1)
-                               || ((id_rs2_addr_i == fwd_rd_addr_i[i]) 
+                               || ((id_rs3_addr_i == fwd_rd_addr_i[i]) 
                                    & fwd_rd_v_i[i]
                                    )
                                );

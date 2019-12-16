@@ -99,6 +99,7 @@ module bp_be_mem_top
 
    , output [2:0]                            frm_o
    , input [4:0]                             fflags_i
+   , input                                   fflags_w_v_i
    );
 
 `declare_bp_fe_be_if(vaddr_width_p, paddr_width_p, asid_width_p, branch_metadata_fwd_width_p);
@@ -268,6 +269,7 @@ bp_be_csr
    ,.translation_en_o(translation_en_lo)
    ,.mstatus_sum_o(mstatus_sum_lo)
    ,.mstatus_mxr_o(mstatus_mxr_lo)
+   ,.fflags_w_v_i(fflags_w_v_i)
    ,.frm_o(frm_o)
    ,.fflags_i(fflags_i)
 

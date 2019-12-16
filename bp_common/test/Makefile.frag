@@ -146,12 +146,18 @@ RV64_P_TESTS = \
   rv64ua-p-amoxor_d  \
   rv64ua-p-amoxor_w  \
   rv64ua-p-lrsc      \
-  rv64uf-p-fadd      \
-  rv64uf-p-ldst      \
-  rv64uf-p-move		 \
   rv64ud-p-fadd      \
+  rv64ud-p-fclass    \
+  rv64ud-p-fcmp      \
+  rv64ud-p-fcvt      \
+  rv64ud-p-fcvt_w    \
+  rv64ud-p-fdiv      \
+  rv64ud-p-fmadd     \
+  rv64ud-p-fmin      \
   rv64ud-p-ldst      \
-  rv64ud-p-move
+  rv64ud-p-move      \
+  rv64ud-p-recoding  \
+  rv64ud-p-structural
 
   #rv64ua-v-amominu_w
 RV64_V_TESTS = \

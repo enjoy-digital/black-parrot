@@ -156,7 +156,6 @@ always_comb
         endcase
 
         // Decide whether to read from floating point regfile (saves power)
-        // NOTE: We read unnecessarily on some unary FP_OPs
         casez (fetch_instr.opcode)
           `RV64_FLOAD_OP:
             begin
@@ -168,10 +167,35 @@ always_comb
               issue_pkt.frs2_v = 1'b1;
             end
           `RV64_FP_OP:
-            begin
-              issue_pkt.frs1_v = 1'b1;
-              issue_pkt.frs2_v = 1'b1;
-            end
+            casez (fetch_instr)
+              `RV64_FCVT_WS, `RV64_FCVT_WUS, `RV64_FCVT_LS, `RV64_FCVT_LUS
+              ,`RV64_FCVT_WD, `RV64_FCVT_WUD, `RV64_FCVT_LD, `RV64_FCVT_LUD:
+                begin
+                  issue_pkt.frs1_v = 1'b1;
+                end
+              `RV64_FCVT_SW, `RV64_FCVT_SWU, `RV64_FCVT_SL, `RV64_FCVT_SLU
+              ,`RV64_FCVT_DW, `RV64_FCVT_DWU, `RV64_FCVT_DL, `RV64_FCVT_DLU:
+                begin
+                  issue_pkt.irs1_v = 1'b1;
+                end
+              `RV64_FCVT_SD, `RV64_FCVT_DS:
+                begin
+                  issue_pkt.frs1_v = 1'b1;
+                end
+              `RV64_FMV_WX, `RV64_FMV_DX:
+                begin
+                  issue_pkt.irs1_v = 1'b1;
+                end
+              `RV64_FMV_XW, `RV64_FMV_XD:
+                begin
+                  issue_pkt.frs1_v = 1'b1;
+                end
+              default:
+                begin
+                  issue_pkt.frs1_v = 1'b1;
+                  issue_pkt.frs2_v = 1'b1;
+                end
+            endcase
           `RV64_FMADD_OP, `RV64_FMSUB_OP, `RV64_FNMSUB_OP, `RV64_FNMADD_OP:
             begin
               issue_pkt.frs1_v = 1'b1;
@@ -302,6 +326,7 @@ always_comb
     isd_status.isd_pc       = issue_pkt_r.pc;
     isd_status.isd_branch_metadata_fwd = issue_pkt_r.branch_metadata_fwd;
     isd_status.isd_irq_v    = accept_irq_i;
+    isd_status.isd_csr_v    = issue_pkt_v_r & decoded.csr_v;
     isd_status.isd_debug_v  = enter_debug_li | exit_debug_li;
     isd_status.isd_fence_v  = issue_pkt_v_r & issue_pkt_r.fence_v;
     isd_status.isd_mem_v    = issue_pkt_v_r & issue_pkt_r.mem_v;
@@ -311,6 +336,8 @@ always_comb
     isd_status.isd_irs2_v   = issue_pkt_v_r & issue_pkt_r.irs2_v;
     isd_status.isd_frs2_v   = issue_pkt_v_r & issue_pkt_r.frs2_v;
     isd_status.isd_rs2_addr = issue_pkt_r.instr.fields.rtype.rs2_addr;
+    isd_status.isd_frs3_v   = issue_pkt_v_r & issue_pkt_r.frs3_v;
+    isd_status.isd_rs3_addr = issue_pkt_r.instr.fields.fmatype.rs3_addr;
 
     // Form dispatch packet
     dispatch_pkt.v      = (issue_pkt_v_r | enter_debug_li | exit_debug_li | accept_irq_i) & dispatch_v_i;
@@ -319,9 +346,9 @@ always_comb
                           & ~(enter_debug_li | exit_debug_li);
     dispatch_pkt.pc     = expected_npc_i;
     dispatch_pkt.instr  = issue_pkt_r.instr;
-    dispatch_pkt.rs1    = issue_pkt_r.frs1_v ? frf_rs1 : irf_rs1;
-    dispatch_pkt.rs2    = issue_pkt_r.frs2_v ? frf_rs2 : irf_rs2;
-    dispatch_pkt.imm    = issue_pkt_r.frs3_v ? frf_rs3 : issue_pkt_r.imm;
+    dispatch_pkt.rs1    = decoded.frs1_v ? frf_rs1 : irf_rs1;
+    dispatch_pkt.rs2    = decoded.frs2_v ? frf_rs2 : irf_rs2;
+    dispatch_pkt.imm    = decoded.frs3_v ? frf_rs3 : issue_pkt_r.imm;
     dispatch_pkt.decode = decoded;
   end
 assign dispatch_pkt_o = dispatch_pkt;

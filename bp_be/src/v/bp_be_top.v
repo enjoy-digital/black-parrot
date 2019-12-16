@@ -113,6 +113,7 @@ logic                     pc_v_mem3;
 logic [vaddr_width_p-1:0] pc_mem3;
 logic [instr_width_p-1:0] instr_mem3;
 
+logic fwb;
 logic [2:0] frm;
 logic [4:0] fflags;
 bp_be_commit_pkt_s commit_pkt;
@@ -179,7 +180,6 @@ bp_be_calculator_top
    ,.calc_status_o(calc_status)
 
    ,.frm_i(frm)
-   ,.fflags_o(fflags)
 
    ,.mmu_cmd_o(mmu_cmd)
    ,.mmu_cmd_v_o(mmu_cmd_v)
@@ -253,8 +253,9 @@ bp_be_mem_top
     ,.external_irq_i(external_irq_i)
     ,.accept_irq_o(accept_irq_lo)
 
+    ,.fflags_w_v_i(wb_pkt.fflags_w_v)
+    ,.fflags_i(wb_pkt.fflags)
     ,.frm_o(frm)
-    ,.fflags_i(fflags)
 
     ,.trap_pkt_o(trap_pkt)
     );

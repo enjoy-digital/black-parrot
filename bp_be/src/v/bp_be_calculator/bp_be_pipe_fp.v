@@ -46,7 +46,8 @@ assign instr = instr_i;
 assign decode = decode_i;
 
 // Module instantiations
-wire [2:0] frm_li = (instr.fields.ftype.rm == e_dyn) ? frm_i : instr.fields.ftype.rm;
+rv64_frm_e frm_li;
+assign frm_li = (instr.fields.ftype.rm == e_dyn) ? rv64_frm_e'(frm_i) : rv64_frm_e'(instr.fields.ftype.rm);
 bp_be_hardfloat_fpu
  fpu
   (.clk_i(clk_i)
@@ -57,10 +58,9 @@ bp_be_hardfloat_fpu
    ,.c_i(rs3_i)
 
    ,.op_i(decode.fu_op.fu_op.fp_fu_op)
-   // TODO: connect to opcodes
-   ,.ipr_i(bp_be_fp_pr_e'(1))
-   ,.opr_i(bp_be_fp_pr_e'(1))
-   ,.rm_i(rv64_frm_e'(frm_li))
+   ,.ipr_i(decode.ipr)
+   ,.opr_i(decode.opr)
+   ,.rm_i(frm_li)
 
    ,.o(data_o)
    ,.eflags_o(fflags_o)
