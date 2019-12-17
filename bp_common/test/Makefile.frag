@@ -146,6 +146,17 @@ RV64_P_TESTS = \
   rv64ua-p-amoxor_d  \
   rv64ua-p-amoxor_w  \
   rv64ua-p-lrsc      \
+  rv64uf-p-fadd      \
+  rv64uf-p-fmadd     \
+  rv64uf-p-fclass    \
+  rv64uf-p-fcmp      \
+  rv64uf-p-fcvt      \
+  rv64uf-p-fcvt_w    \
+  rv64uf-p-fdiv      \
+  rv64uf-p-fmin      \
+  rv64uf-p-ldst      \
+  rv64uf-p-move      \
+  rv64uf-p-recoding  \
   rv64ud-p-fadd      \
   rv64ud-p-fclass    \
   rv64ud-p-fcmp      \
