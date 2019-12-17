@@ -115,8 +115,8 @@ bp_be_pipe_stage_reg_s [pipe_stage_els_lp-1:0] calc_stage_r;
 bp_be_exception_s      [pipe_stage_els_lp  :0] exc_stage_n;
 bp_be_exception_s      [pipe_stage_els_lp-1:0] exc_stage_r;
 
-logic [pipe_stage_els_lp  :0][dword_width_p-1:0] comp_stage_n;
-logic [pipe_stage_els_lp-1:0][dword_width_p-1:0] comp_stage_r;
+bp_be_comp_stage_reg_s [pipe_stage_els_lp  :0] comp_stage_n;
+bp_be_comp_stage_reg_s [pipe_stage_els_lp-1:0] comp_stage_r;
 
 logic [dword_width_p-1:0] pipe_nop_data_lo;
 logic [dword_width_p-1:0] pipe_int_data_lo, pipe_mul_data_lo, pipe_mem_data_lo, pipe_fp_data_lo;
@@ -213,6 +213,7 @@ assign bypass_rs3 = bypass_frs3;
 
 // Computation pipelines
 // Integer pipe: 1 cycle latency
+rv64_fflags_s int_fflags_lo;
 bp_be_pipe_int 
  #(.vaddr_width_p(vaddr_width_p))
  pipe_int
@@ -221,12 +222,14 @@ bp_be_pipe_int
  
    ,.decode_i(reservation_r.decode)
    ,.pc_i(reservation_r.pc)
+   ,.instr_i(reservation_r.instr)
    ,.rs1_i(reservation_r.rs1)
    ,.rs2_i(reservation_r.rs2)
    ,.imm_i(reservation_r.imm)
 
    ,.data_o(pipe_int_data_lo)
-   
+   ,.frm_i(frm_i)
+   ,.fflags_o(int_fflags_lo)
    ,.br_tgt_o(br_tgt_int1)
    );
 
@@ -279,7 +282,7 @@ bp_be_pipe_mem
    );
 
   // Floating point pipe: 4 cycle latency
-  rv64_fflags_s fflags_lo;
+  rv64_fflags_s fp_fflags_lo;
   bp_be_pipe_fp 
    pipe_fp
     (.clk_i(clk_i)
@@ -292,7 +295,7 @@ bp_be_pipe_mem
      ,.rs3_i(reservation_r.imm)
 
      ,.frm_i(frm_i)
-     ,.fflags_o(fflags_lo)
+     ,.fflags_o(fp_fflags_lo)
      ,.data_o(pipe_fp_data_lo)
      );
 
@@ -317,24 +320,18 @@ assign pipe_int_data_lo_v = calc_stage_r[0].pipe_int_v;
 
 assign pipe_nop_data_lo = '0;
 
-logic [pipe_stage_els_lp:0][dword_width_p-1:0] comp_stage_mux_li;
-logic [pipe_stage_els_lp:0]                    comp_stage_mux_sel_li;
-
-assign comp_stage_mux_li = {pipe_nop_data_lo, pipe_fp_data_lo, pipe_mem_data_lo, pipe_mul_data_lo, pipe_int_data_lo, pipe_nop_data_lo};
-assign comp_stage_mux_sel_li = {1'b0, pipe_fp_data_lo_v, pipe_mem_data_lo_v, pipe_mul_data_lo_v, pipe_int_data_lo_v, 1'b1};
-bsg_mux_segmented 
- #(.segments_p(pipe_stage_els_lp+1)
-   ,.segment_width_p(dword_width_p)
-   ) 
- comp_stage_mux
-  (.data0_i({comp_stage_r[0+:pipe_stage_els_lp], dword_width_p'(0)})
-   ,.data1_i(comp_stage_mux_li)
-   ,.sel_i(comp_stage_mux_sel_li)
-   ,.data_o(comp_stage_n)
-   );
+always_comb
+  begin
+    comp_stage_n[0] =                      '{data: pipe_nop_data_lo, fflags: '0           };
+    comp_stage_n[1] = pipe_int_data_lo_v ? '{data: pipe_int_data_lo, fflags: int_fflags_lo} : comp_stage_r[0];
+    comp_stage_n[2] = pipe_mul_data_lo_v ? '{data: pipe_mul_data_lo, fflags: '0           } : comp_stage_r[1];
+    comp_stage_n[3] = pipe_mem_data_lo_v ? '{data: pipe_mem_data_lo, fflags: '0           } : comp_stage_r[2];
+    comp_stage_n[4] = pipe_fp_data_lo_v  ? '{data: pipe_fp_data_lo , fflags: fp_fflags_lo } : comp_stage_r[3];
+    comp_stage_n[5] = comp_stage_r[4];
+  end
 
 bsg_dff 
- #(.width_p(dword_width_p*pipe_stage_els_lp)
+ #(.width_p($bits(bp_be_comp_stage_reg_s)*pipe_stage_els_lp)
    ) 
  comp_stage_reg 
   (.clk_i(clk_i)
@@ -410,7 +407,7 @@ always_comb
         comp_stage_n_slice_fwb_v[i]   = calc_stage_n[i].frf_w_v & ~exc_stage_n[i].poison_v; 
         comp_stage_n_slice_rd_addr[i] = calc_stage_n[i].instr.fields.rtype.rd_addr;
 
-        comp_stage_n_slice_rd[i]      = comp_stage_n[i];
+        comp_stage_n_slice_rd[i]      = comp_stage_n[i].data;
       end
   end
 
@@ -449,22 +446,12 @@ assign commit_pkt.pc         = calc_stage_r[2].pc;
 assign commit_pkt.npc        = calc_stage_r[1].pc;
 assign commit_pkt.instr      = calc_stage_r[2].instr;
 
-// Delay fflags 1 cycle until writeback
-rv64_fflags_s fflags_r;
-always_ff @(posedge clk_i)
-  fflags_r <= fflags_lo;
-
 assign wb_pkt.fp_not_int = calc_stage_r[4].frf_w_v & ~exc_stage_r[4].poison_v;
-assign wb_pkt.fflags_w_v = calc_stage_r[4].pipe_fp_v;
-assign wb_pkt.fflags = fflags_r;
+assign wb_pkt.fflags_w_v = calc_stage_r[4].pipe_fp_v | calc_stage_r[4].pipe_int_v;
+assign wb_pkt.fflags  = comp_stage_r[4].fflags;
 assign wb_pkt.rd_w_v  = (calc_stage_r[4].irf_w_v | calc_stage_r[4].frf_w_v) & ~exc_stage_r[4].poison_v;
 assign wb_pkt.rd_addr = calc_stage_r[4].instr.fields.rtype.rd_addr;
-assign wb_pkt.rd_data = comp_stage_r[4];
-
-//assign wb_pkt.fp_not_int = calc_stage_r[3].frf_w_v & ~exc_stage_r[3].poison_v;
-//assign wb_pkt.rd_w_v  = (calc_stage_r[3].irf_w_v | calc_stage_r[3].frf_w_v) & ~exc_stage_r[3].poison_v;
-//assign wb_pkt.rd_addr = calc_stage_r[3].instr.fields.rtype.rd_addr;
-//assign wb_pkt.rd_data = comp_stage_r[3];
+assign wb_pkt.rd_data = comp_stage_r[4].data;
 
 endmodule
 

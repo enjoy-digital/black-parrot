@@ -340,6 +340,7 @@ always_comb
           decode.frf_w_v = 1'b1;
           decode.ipr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
           decode.opr = bp_be_fp_pr_e'(instr.fields.rtype.funct7[0+:2]);
+          decode.result_sel = e_result_from_fp;
           unique casez (instr)
             `RV64_FADD_S, `RV64_FADD_D:
               begin

@@ -123,6 +123,8 @@ always_comb
     frs3_data_haz_v[1] = (isd_status_cast_i.isd_frs3_v & rs3_match_vector[1])
                          & (dep_status_li[1].mem_fwb_v | dep_status_li[1].fp_fwb_v);
 
+
+    // Detect integer and float data hazards for EX3
     irs1_data_haz_v[2] = (isd_status_cast_i.isd_irs1_v & rs1_match_vector[2])
                          & (dep_status_li[2].fp_iwb_v);
 

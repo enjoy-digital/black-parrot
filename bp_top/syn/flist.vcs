@@ -172,6 +172,7 @@ $BP_BE_DIR/src/v/bp_be_calculator/bp_be_calculator_top.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_fp_bypass.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_fp_regfile.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_hardfloat_fpu.v
+$BP_BE_DIR/src/v/bp_be_calculator/bp_be_hardfloat_fpu_lite.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_instr_decoder.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_int_alu.v
 $BP_BE_DIR/src/v/bp_be_calculator/bp_be_int_bypass.v

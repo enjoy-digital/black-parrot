@@ -139,10 +139,11 @@ typedef enum bit
   ,e_offset_is_zero = 1'b1
 } bp_be_offset_e;
 
-typedef enum bit
+typedef enum bit [1:0]
 {
-  e_result_from_alu       = 1'b0
-  ,e_result_from_pc_plus4 = 1'b1
+  e_result_from_alu       = 2'b00
+  ,e_result_from_pc_plus4 = 2'b01
+  ,e_result_from_fp       = 2'b10
 } bp_be_result_e;
 
 typedef enum logic

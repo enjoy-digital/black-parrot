@@ -327,7 +327,7 @@ typedef struct packed
 {
   // State Dirty
   // 0 - FS and XS are both != 11
-  // 1 - set if FS or SX == 11
+  // 1 - set if FS or XS == 11
   //  Note: readonly
   logic        sd;
   logic [26:0] wpri1;

@@ -209,8 +209,8 @@ wrapper
   
        ,.ex1_br_tgt_i(be_calculator.calc_status.ex1_npc)
        ,.ex1_btaken_i(be_calculator.pipe_int.btaken)
-       ,.iwb_result_i(be_calculator.comp_stage_n[3])
-       ,.fwb_result_i(be_calculator.comp_stage_n[4])
+       ,.iwb_result_i(be_calculator.comp_stage_n[3].data)
+       ,.fwb_result_i(be_calculator.comp_stage_n[4].data)
   
        ,.cmt_trace_exc_i(be_calculator.exc_stage_n[1+:5])
   
