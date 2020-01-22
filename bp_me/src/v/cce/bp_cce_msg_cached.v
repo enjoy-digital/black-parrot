@@ -11,6 +11,15 @@
  *
  */
 
+// TODO: now that header and data comes in on "separate" lines, need to figure out how the
+// pop and push commands work.
+// For push, this should be easy. Set where to read information from, then do the push.
+// The only odd thing is that some pushes (i.e., sending a writeback on to memory) will
+// dequeue data packets from the LCE response channel, or uncached stores will dequeue
+// data packet from LCE request channel. In these cases, popq should then only dequeue the header.
+
+
+
 module bp_cce_msg_cached
   import bp_common_pkg::*;
   import bp_common_aviary_pkg::*;
@@ -585,6 +594,7 @@ module bp_cce_msg_cached
       default: lce_cmd_addr = '0;
     endcase
 
+    // TODO: this is a fun bug...bit width selection should be bits for associativity
     case (decoded_inst_i.lce_cmd_way_sel)
       e_lce_cmd_way_r0: lce_cmd_way = gpr_i[e_gpr_r0][lce_id_width_p-1:0];
       e_lce_cmd_way_r1: lce_cmd_way = gpr_i[e_gpr_r1][lce_id_width_p-1:0];
@@ -736,6 +746,8 @@ module bp_cce_msg_cached
         // the coherence transaction is closed (this happens when memory response returns after
         // the coh_ack for the transaction).
         else if (decoded_inst_i.mem_resp_yumi) begin
+          // TODO: this might be a bug? What memory responses would this apply to?
+          // Could require programmer to do it explicitly in microcode.
           if (~pending_w_busy_o) begin
             mem_resp_yumi_o = decoded_inst_i.mem_resp_yumi;
             // decrement the fence counter when dequeueing the memory response

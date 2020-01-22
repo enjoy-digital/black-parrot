@@ -86,6 +86,8 @@ $BASEJUMP_STL_DIR/bsg_misc/bsg_dff_en.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_dff_reset.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_dff_reset_en.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_encode_one_hot.v
+$BASEJUMP_STL_DIR/bsg_misc/bsg_hash_bank.v
+$BASEJUMP_STL_DIR/bsg_misc/bsg_hash_bank_reverse.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_mux.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_mux_one_hot.v
 $BASEJUMP_STL_DIR/bsg_misc/bsg_mux_segmented.v

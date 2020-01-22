@@ -316,6 +316,43 @@ bind bp_be_top
         ,.mem_cmd_ready_i(mem_cmd_ready_i)
         );
 
+  bind bp_cce_dir
+    bp_cce_dir_nonsynth_tracer
+      #(.sets_p(sets_p)
+        ,.lce_assoc_p(lce_assoc_p)
+        ,.num_lce_p(num_lce_p)
+        ,.tag_width_p(tag_width_p)
+        ,.cce_id_width_p(cce_id_width_p)
+        )
+      bp_cce_dir_tracer
+       (.clk_i(clk_i & (testbench.cce_trace_p == 1))
+        ,.reset_i(reset_i)
+        ,.freeze_i(bp_cce.cfg_bus_cast_i.freeze)
+
+        ,.cce_id_i(cce_id_i)
+
+        ,.set_i(set_i)
+        ,.lce_i(lce_i)
+        ,.way_i(way_i)
+        ,.lru_way_i(lru_way_i)
+        ,.r_cmd_i(r_cmd_i)
+        ,.r_v_i(r_v_i)
+        ,.tag_i(tag_i)
+        ,.coh_state_i(coh_state_i)
+        ,.w_cmd_i(w_cmd_i)
+        ,.w_v_i(w_v_i)
+        ,.w_clr_row_i(w_clr_row_i)
+        ,.sharers_v_i(sharers_v_o)
+        ,.sharers_hits_i(sharers_hits_r)
+        ,.sharers_ways_i(sharers_ways_r)
+        ,.sharers_coh_states_i(sharers_coh_states_r)
+        ,.lru_v_i(lru_v_o)
+        ,.lru_cached_excl_i(lru_cached_excl_o)
+        ,.lru_tag_i(lru_tag_o)
+        ,.busy_i(busy_o)
+        ,.tag_o_i(tag_o)
+        );
+
 wire [io_noc_cord_width_p-1:0] dst_cord_lo = 1;
 
 bp_me_cce_to_mem_link_bidir

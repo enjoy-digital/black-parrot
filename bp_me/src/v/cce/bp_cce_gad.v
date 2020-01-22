@@ -10,13 +10,16 @@
  *   directory RAM into a few vectors that indicate for each LCE if there is a hit for the target
  *   address, which way in the LCE the hit occurred in, and the coherence state of that entry.
  *
+ *   The lce_assoc_p parameter indicates the maximum associativity of all LCE types in the system.
+ *
  */
 
 module bp_cce_gad
   import bp_common_pkg::*;
   import bp_cce_pkg::*;
-  #(parameter num_lce_p              = "inv"
+  #(parameter num_lce_p                = "inv"
     , parameter lce_assoc_p            = "inv"
+    , parameter lce_id_width_p         = "inv"
 
     // Derived parameters
     , localparam lg_num_lce_lp         = `BSG_SAFE_CLOG2(num_lce_p)
@@ -28,21 +31,24 @@ module bp_cce_gad
    // high if the current op is a GAD op
    , input                                                 gad_v_i
 
+   // from Directory
    , input                                                 sharers_v_i
    , input [num_lce_p-1:0]                                 sharers_hits_i
    , input [num_lce_p-1:0][lg_lce_assoc_lp-1:0]            sharers_ways_i
-   , input [num_lce_p-1:0][`bp_coh_bits-1:0]               sharers_coh_states_i
+   , input bp_coh_states_e [num_lce_p-1:0]                 sharers_coh_states_i
 
-   , input [lg_num_lce_lp-1:0]                             req_lce_i
+   // from MSHR - request details
+   , input [lce_id_width_p-1:0]                            req_lce_i
    , input                                                 req_type_flag_i
    , input                                                 lru_dirty_flag_i
    , input                                                 lru_cached_excl_flag_i
 
+   // Outputs
    , output logic [lg_lce_assoc_lp-1:0]                    req_addr_way_o
 
    , output logic                                          transfer_flag_o
-   , output logic [lg_num_lce_lp-1:0]                      transfer_lce_o
-   , output logic [lg_lce_assoc_lp-1:0]                    transfer_way_o
+   , output logic [lce_id_width_p-1:0]                     owner_lce_o
+   , output logic [lg_lce_assoc_lp-1:0]                    owner_way_o
    , output logic                                          replacement_flag_o
    , output logic                                          upgrade_flag_o
    , output logic                                          invalidate_flag_o
@@ -61,7 +67,7 @@ module bp_cce_gad
     #(.num_out_p(num_lce_p)
      )
      lce_id_to_one_hot
-     (.i(req_lce_i)
+     (.i(req_lce_i[0+:lg_num_lce_lp])
       ,.o(lce_id_one_hot)
      );
 
@@ -81,13 +87,13 @@ module bp_cce_gad
 
   // hit in requesting LCE
   logic req_lce_cached;
-  assign req_lce_cached = lce_cached[req_lce_i];
+  assign req_lce_cached = lce_cached[req_lce_i[0+:lg_num_lce_lp]];
   // read-only permissions in requesting LCE
   logic req_lce_ro;
-  assign req_lce_ro = req_lce_cached & sharers_coh_states_i[req_lce_i][`bp_coh_shared_bit];
+  assign req_lce_ro = req_lce_cached & sharers_coh_states_i[req_lce_i[0+:lg_num_lce_lp]][`bp_coh_shared_bit];
 
   assign req_addr_way_o = req_lce_cached
-    ? sharers_ways_i[req_lce_i]
+    ? sharers_ways_i[req_lce_i[0+:lg_num_lce_lp]]
     : '0;
 
   // request type
@@ -108,30 +114,31 @@ module bp_cce_gad
   // Replace the LRU block if not doing an upgrade and the lru block is actually dirty
   assign replacement_flag_o = (~upgrade_flag_o & lru_cached_excl_flag_i & lru_dirty_flag_i);
 
-  // for now, if the request results in a transfer, we invalidate the other LCEA
+  // TODO: ideally, we would not invalidate the owner LCE, instead, downgrade it to read-only
+  // if it is a read request
+  // for now, if the request results in a transfer, we invalidate the other LCE
   // this works for MESI, MSI, MI/EI, but needs adjustment if adding O or F states in MOESIF
   assign invalidate_flag_o = (req_rd) ? cached_exclusive_flag_o : cached_flag_o;
-  
-  // Transfer stuff
-  // transfer LCE
-  logic [num_lce_p-1:0] transfer_lce_one_hot;
-  logic [lg_num_lce_lp-1:0] transfer_lce_lo;
-  logic transfer_lce_v;
 
-  assign transfer_lce_one_hot = (gad_v_i & transfer_flag_o) ? (lce_cached & ~lce_id_one_hot) : '0;
+  // Transfer
+  logic [num_lce_p-1:0] owner_lce_one_hot;
+  assign owner_lce_one_hot = (gad_v_i & transfer_flag_o) ? (lce_cached & ~lce_id_one_hot) : '0;
+
+  logic [lg_num_lce_lp-1:0] owner_lce_lo;
+  logic owner_lce_v;
   bsg_encode_one_hot
     #(.width_p(num_lce_p)
       ,.lo_to_hi_p(1)
       )
     lce_cached_to_lce_id
-     (.i(transfer_lce_one_hot)
-      ,.addr_o(transfer_lce_lo)
-      ,.v_o(transfer_lce_v)
+     (.i(owner_lce_one_hot)
+      ,.addr_o(owner_lce_lo)
+      ,.v_o(owner_lce_v)
       );
 
-  assign transfer_lce_o = (gad_v_i & transfer_flag_o & transfer_lce_v)
-                          ? transfer_lce_lo : '0;
-  assign transfer_way_o = (gad_v_i & transfer_flag_o & transfer_lce_v)
-                          ? sharers_ways_i[transfer_lce_lo] : '0;
+  assign owner_lce_o = (gad_v_i & transfer_flag_o & owner_lce_v)
+                          ? {'0, owner_lce_lo} : '0;
+  assign owner_way_o = (gad_v_i & transfer_flag_o & owner_lce_v)
+                          ? sharers_ways_i[owner_lce_lo] : '0;
 
 endmodule

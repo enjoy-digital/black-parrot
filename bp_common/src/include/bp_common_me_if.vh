@@ -6,6 +6,8 @@
  *
  */
 
+// TODO: rename to bp_common_lce_cce_if.vh (or bp_common_lce_if.vh)?
+
 `ifndef BP_COMMON_ME_IF_VH
 `define BP_COMMON_ME_IF_VH
 

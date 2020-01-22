@@ -26,14 +26,13 @@ module bp_cce_fsm
     , localparam lg_lce_sets_lp            = `BSG_SAFE_CLOG2(lce_sets_p)
     , localparam ptag_width_lp              = (paddr_width_p-lg_lce_sets_lp
                                               -lg_block_size_in_bytes_lp)
-    , localparam entry_width_lp            = (ptag_width_lp+`bp_coh_bits)
-    , localparam tag_set_width_lp          = (entry_width_lp*lce_assoc_p)
-    , localparam way_group_width_lp        = (tag_set_width_lp*num_lce_p)
-    , localparam way_group_offset_high_lp  = (lg_block_size_in_bytes_lp+lg_lce_sets_lp)
-    , localparam num_way_groups_lp         = (lce_sets_p/num_cce_p)
+    , localparam num_way_groups_lp         = ((lce_sets_p % num_cce_p) == 0) ? (lce_sets_p/num_cce_p) : ((lce_sets_p/num_cce_p) + 1)
     , localparam lg_num_way_groups_lp      = `BSG_SAFE_CLOG2(num_way_groups_lp)
     , localparam inst_ram_addr_width_lp    = `BSG_SAFE_CLOG2(num_cce_instr_ram_els_p)
     , localparam cfg_bus_width_lp          = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
+
+    // TODO: get rid of these and move to NPOT support
+    , localparam way_group_offset_high_lp  = (lg_block_size_in_bytes_lp+lg_lce_sets_lp)
     , localparam set_shift_lp              = (num_cce_p == 1) ? 0 : lg_num_cce_lp
 
     // interface widths
@@ -76,18 +75,12 @@ module bp_cce_fsm
    , input                                             mem_cmd_ready_i
   );
 
-  // stub unused ports
-  assign mem_resp_o = '0;
-  assign mem_resp_v_o = '0;
-  assign mem_cmd_yumi_o = '0;
   // stub cfg ucode output, since FSM CCE has no ucode
   assign cfg_cce_ucode_data_o = '0;
 
   //synopsys translate_off
   initial begin
     assert (lce_sets_p > 1) else $error("Number of LCE sets must be greater than 1");
-    assert (num_cce_p >= 1 && `BSG_IS_POW2(num_cce_p))
-      else $error("Number of CCE must be power of two");
     assert (counter_max > num_way_groups_lp) else $error("Counter max value not large enough");
   end
   //synopsys translate_on
@@ -116,6 +109,27 @@ module bp_cce_fsm
   `declare_bp_cfg_bus_s(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p);
   bp_cfg_bus_s cfg_bus_cast_i;
   assign cfg_bus_cast_i = cfg_bus_i;
+
+  // convert address (excluding block offset bits) into CCE local set index
+  // TODO: for now, there is a 1:1 ratio of sets stored in directory and way groups
+  // - when this changes, or when adding support for multiple LCE organizations, one bsg_hash_bank
+  //   will be needed to map address to way group, and one per directory to map address to LCE set
+  logic [lg_num_cce_lp-1:0] cce_dst_id_lo;
+  localparam hash_index_width_lp=$clog2((2**lg_lce_sets_lp+num_cce_p-1)/num_cce_p);
+  logic [hash_index_width_lp-1:0] cce_set_id_lo;
+  logic [paddr_width_p-1:0] hash_addr_li;
+  assign hash_addr_li =
+    (decoded_inst_lo.dir_way_group_sel == e_dir_wg_sel_req_addr) ? mshr.paddr : mshr.lru_paddr;
+
+  bsg_hash_bank
+    #(.banks_p(num_cce_p) // number of CCE's to spread way groups over
+      ,.width_p(lg_lce_sets_lp) // width of address input
+      )
+    addr_to_cce_id
+     (.i({<< {hash_addr_li[lg_block_size_in_bytes_lp+:lg_lce_sets_lp]}})
+      ,.bank_o(cce_dst_id_lo)
+      ,.index_o(cce_set_id_lo)
+      );
 
   // CCE FSM
 
@@ -191,18 +205,18 @@ module bp_cce_fsm
 
   // Directory
   bp_cce_dir
-    #(.num_way_groups_p(num_way_groups_lp)
+    #(.sets_p(num_way_groups_lp)
       ,.num_lce_p(num_lce_p)
-      ,.num_cce_p(num_cce_p)
       ,.lce_assoc_p(lce_assoc_p)
       ,.tag_width_p(ptag_width_lp)
+      ,.cce_id_width_p(cce_id_width_p)
       )
     directory
      (.clk_i(clk_i)
       ,.reset_i(reset_i)
       ,.cce_id_i(cfg_bus_cast_i.cce_id)
 
-      ,.way_group_i(dir_way_group_li)
+      ,.set_i(dir_set_li[0+:lg_num_way_groups_lp])
       ,.lce_i(dir_lce_li)
       ,.way_i(dir_way_li)
       ,.lru_way_i(dir_lru_way_li)

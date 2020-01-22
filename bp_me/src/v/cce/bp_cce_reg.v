@@ -53,9 +53,9 @@ module bp_cce_reg
    , input [tag_width_lp-1:0]                                              dir_tag_i
 
    , input [lg_lce_assoc_lp-1:0]                                           gad_req_addr_way_i
-   , input [lg_num_lce_lp-1:0]                                             gad_transfer_lce_i
-   , input [lg_lce_assoc_lp-1:0]                                           gad_transfer_lce_way_i
-   , input                                                                 gad_transfer_flag_i
+   , input [lg_num_lce_lp-1:0]                                             gad_owner_lce_i
+   , input [lg_lce_assoc_lp-1:0]                                           gad_owner_lce_way_i
+   , input                                                                 gad_owner_flag_i
    , input                                                                 gad_replacement_flag_i
    , input                                                                 gad_upgrade_flag_i
    , input                                                                 gad_invalidate_flag_i
@@ -71,8 +71,15 @@ module bp_cce_reg
 
    , output logic [`bp_coh_bits-1:0]                                       coh_state_o
 
-   , output logic [dword_width_p-1:0]                                      nc_data_o
   );
+
+  // TODO: compute a ucode_write_en signal
+  // by default, the ucode is what executes and changes state, however, the message unit
+  // may take priority over ucode instructions.
+  // The coarsest level of priority would allow the message unit to stall the entire instruction,
+  // even if they are non-conflicting.
+  wire ucode_write_en = ~stall_i;
+
 
   wire unused = pending_v_o_i;
 
@@ -94,13 +101,11 @@ module bp_cce_reg
   bp_cce_mshr_s mshr_r, mshr_n;
 
   logic [`bp_cce_inst_num_gpr-1:0][`bp_cce_inst_gpr_width-1:0] gpr_r, gpr_n;
-  logic [dword_width_p-1:0] nc_data_r, nc_data_n;
   bp_coh_states_e coh_state_r, coh_state_n;
 
   // Output register values
   assign mshr_o = mshr_r;
   assign gpr_o = gpr_r;
-  assign nc_data_o = nc_data_r;
   assign coh_state_o = coh_state_r;
 
   always_comb
@@ -116,6 +121,13 @@ module bp_cce_reg
         gpr_n[i] = {'0, lce_resp_type_i};
       end else if (decoded_inst_i.mem_resp_type_w_v & decoded_inst_i.gpr_w_mask[i]) begin
         gpr_n[i] = {'0, mem_resp_type_i};
+      // TODO: ensure this write occurs even if stalling because directory is busy
+      // TODO: this is broken...directory instruction executes for one cycle, then following cycle
+      // directory asserts busy signal to block next instruction.
+      // Directory will signal when the output address is valid, but we need a way to track where it should
+      // be written to. The write valid signal is asserted while busy_o is high, so the instruction following
+      // the directory read won't be writing any state. Thus, it will be safe to use only the addr_v_o signal
+      // from the directory to initiate the write, if we have remembered the correct destination.
       end else if (decoded_inst_i.dir_r_v
                    & (decoded_inst_i.minor_op_u.dir_minor_op == e_rde_op)
                    & decoded_inst_i.gpr_w_mask[i]) begin
@@ -124,11 +136,6 @@ module bp_cce_reg
         gpr_n[i] = '0;
       end
     end
-
-    // Uncached data register is always sourced from LCE Request
-    // Uncached data that is being returned to an LCE from a Mem Data Resp does not need
-    // to be registered, and is handled by bp_cce_msg module.
-    nc_data_n = lce_req.msg.uc_req.data;
 
     // Default coherence state
     coh_state_n = bp_coh_states_e'(mov_src_i[0+:`bp_coh_bits]);
@@ -177,9 +184,9 @@ module bp_cce_reg
         end
       endcase
 
-      // Transfer LCE and Transfer LCE Way
-      mshr_n.tr_lce_id = gad_transfer_lce_i;
-      mshr_n.tr_way_id = gad_transfer_lce_way_i;
+      // Owner LCE and Owner LCE Way
+      mshr_n.owner_lce_id = gad_owner_lce_i;
+      mshr_n.owner_way_id = gad_owner_lce_way_i;
 
       // Flags
 
@@ -398,7 +405,6 @@ module bp_cce_reg
     if (reset_i) begin
       mshr_r <= '0;
       gpr_r <= '0;
-      nc_data_r <= '0;
       coh_state_r <= bp_coh_states_e'('0);
     end else begin
       // MSHR writes
@@ -415,9 +421,9 @@ module bp_cce_reg
         if (decoded_inst_i.lru_way_w_v) begin
           mshr_r.lru_way_id <= mshr_n.lru_way_id;
         end
-        if (decoded_inst_i.transfer_lce_w_v) begin
-          mshr_r.tr_lce_id <= mshr_n.tr_lce_id;
-          mshr_r.tr_way_id <= mshr_n.tr_way_id;
+        if (decoded_inst_i.owner_lce_w_v) begin
+          mshr_r.owner_lce_id <= mshr_n.owner_lce_id;
+          mshr_r.owner_way_id <= mshr_n.owner_way_id;
         end
         // Flags
         for (int i = 0; i < `bp_cce_inst_num_flags; i=i+1) begin
@@ -425,6 +431,8 @@ module bp_cce_reg
             mshr_r.flags[i] <= mshr_n.flags[i];
           end
         end
+        // TODO: ensure that this write occurs even if stalling current instruction
+        // because directory is busy
         if (dir_lru_v_i) begin
           mshr_r.flags[e_flag_sel_lef] <= mshr_n.flags[e_flag_sel_lef];
           mshr_r.lru_paddr <= mshr_n.lru_paddr;
@@ -435,7 +443,7 @@ module bp_cce_reg
           mshr_r.next_coh_state <= mshr_n.next_coh_state;
         end
 
-        if (decoded_inst_i.nc_req_size_w_v) begin
+        if (decoded_inst_i.uc_req_size_w_v) begin
           mshr_r.uc_req_size <= mshr_n.uc_req_size;
         end
       end
@@ -445,11 +453,6 @@ module bp_cce_reg
         if (decoded_inst_i.gpr_w_mask[i]) begin
           gpr_r[i] <= gpr_n[i];
         end
-      end
-
-      // Uncached data and request size
-      if (decoded_inst_i.nc_data_w_v) begin
-        nc_data_r <= nc_data_n;
       end
 
       if (decoded_inst_i.mov_dst_w_v & (decoded_inst_i.dst_sel == e_dst_sel_special)

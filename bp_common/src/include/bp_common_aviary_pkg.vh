@@ -30,8 +30,13 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
+
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -80,9 +85,13 @@ package bp_common_aviary_pkg;
       
       ,itlb_els             : 8
       ,dtlb_els             : 8
-      
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -133,8 +142,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
       
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -184,8 +197,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
       
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -235,8 +252,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -286,8 +307,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -337,8 +362,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -388,8 +417,12 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
@@ -439,8 +472,13 @@ package bp_common_aviary_pkg;
       ,itlb_els             : 8
       ,dtlb_els             : 8
 
-      ,lce_sets             : 64
-      ,lce_assoc            : 8
+      ,dcache_sets          : 64
+      ,dcache_assoc         : 8
+      ,icache_sets          : 64
+      ,icache_assoc         : 8
+      ,acache_sets          : 64
+      ,acache_assoc         : 8
+
       ,cce_block_width      : 512
       ,cce_pc_width         : 8
 
