@@ -44,6 +44,10 @@ module bp_cce
     `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_max_assoc_p, dword_width_p, cce_block_width_p)
     `declare_bp_me_if_widths(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_max_assoc_p)
 
+    , localparam lce_assoc_width_lp = `BSG_SAFE_CLOG2(lce_max_assoc_p)
+    , localparam counter_width_lp   = 64
+
+
     // TODO:
     // In most cases, use cce_id_width_p and lce_id_width_p instead of these.
     , localparam lg_num_lce_lp             = `BSG_SAFE_CLOG2(num_lce_p)
@@ -51,7 +55,6 @@ module bp_cce
 
     // TODO: these values will not be constant for all LCEs in new system with varying
     // organizations for I$, D$, A$
-    , localparam lg_lce_assoc_lp           = `BSG_SAFE_CLOG2(lce_assoc_p)
     , localparam lg_lce_sets_lp            = `BSG_SAFE_CLOG2(lce_sets_p)
     , localparam tag_width_lp              = (paddr_width_p-lg_lce_sets_lp
                                               -lg_block_size_in_bytes_lp)
@@ -132,6 +135,12 @@ module bp_cce
 
   // Config Interface
   `declare_bp_cfg_bus_s(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p);
+
+  // MSHR
+  `declare_bp_cce_mshr_s(lce_id_width_p, lce_max_assoc_p, paddr_width_p);
+
+
+  // Config bus casting
   bp_cfg_bus_s cfg_bus_cast_i;
   assign cfg_bus_cast_i = cfg_bus_i;
 
@@ -146,24 +155,35 @@ module bp_cce
   assign mem_cmd_o = mem_cmd;
   assign mem_resp  = mem_resp_i;
 
-  // MSHR register output signal
-  `declare_bp_cce_mshr_s(lce_id_width_p, lce_max_assoc_p, paddr_width_p);
-  bp_cce_mshr_s mshr;
-
   // Inter-module signals
-  bp_cce_inst_s                        inst_lo;
+
+  // From Fetch to Execute/Pre-Decode
+  logic [cce_pc_width_p-1:0]           fetch_pc_lo;
+  bp_cce_inst_s                        fetch_inst_lo;
+  logic                                fetch_inst_v_lo;
+
+  // From Predecode to Fetch
+  logic [cce_pc_width_p-1:0]           predicted_fetch_pc_lo;
+
+  // From Decoder to rest of Execute
   bp_cce_inst_decoded_s                decoded_inst_lo;
   logic [cce_pc_width_p-1:0]           ex_pc_lo;
-  logic [cce_pc_width_p-1:0]           fetch_pc_lo, predicted_fetch_pc_lo, branch_resolution_pc_lo;
+
+  // From Execute to Fetch/Decode
+  logic [cce_pc_width_p-1:0]           branch_resolution_pc_lo;
   logic                                stall_lo, mispredict_lo;
-  //logic predict_taken_lo; // TODO: may be unused
-  logic                                branch_res_lo, branch_mispredict_lo;
-  logic [`bp_cce_inst_gpr_width-1:0]   src_a, src_b, alu_res_lo;
+
+  // From ALU
+  logic [`bp_cce_inst_gpr_width-1:0]   alu_res_lo;
+
+  // From Source Selector to Execute
+  logic [`bp_cce_inst_gpr_width-1:0]   src_a, src_b;
   logic [paddr_width_p-1:0]            addr_lo;
   logic [lce_id_width_p-1:0]           lce_lo;
   logic [lce_assoc_width_lp-1:0]       way_lo, lru_way_lo;
   bp_coh_states_e                      state_lo;
 
+  // From Directory
   logic dir_busy_lo;
   logic sharers_v_lo;
   logic [num_lce_p-1:0] sharers_hits_lo;
@@ -172,6 +192,24 @@ module bp_cce
   logic dir_addr_v_lo, dir_lru_v_lo;
   logic dir_lru_cached_excl_lo;
   logic [paddr_width_p-1:0] dir_addr_lo, dir_lru_addr_lo;
+
+  // From Register File
+  bp_cce_mshr_s mshr_lo;
+  logic [`bp_cce_inst_num_gpr-1:0][`bp_cce_inst_gpr_width-1:0] gpr_lo;
+  bp_coh_states_e coh_state_default_lo;
+  logic auto_fwd_msg_lo;
+  bp_coh_states_e coh_state_default_lo;
+
+
+
+
+
+
+  // TODO: From Branch, maybe unused
+  logic                                branch_res_lo;
+
+
+
 
   logic [lce_assoc_widthlp-1:0] gad_req_addr_way_lo;
   logic gad_transfer_flag_lo;
@@ -185,13 +223,10 @@ module bp_cce
   logic gad_cached_owned_flag_lo;
   logic gad_cached_dirty_flag_lo;
 
-  logic [`bp_cce_inst_num_gpr-1:0][`bp_cce_inst_gpr_width-1:0] gpr_lo;
-  bp_coh_states_e coh_state_default_lo;
 
-
-
-
-  // Fetch Stage
+  /*
+   * Fetch Stage
+   */
 
   // Inst Fetch and microcode RAM
   bp_cce_inst_ram
@@ -206,7 +241,8 @@ module bp_cce
       ,.stall_i(stall_lo)
       ,.mispredict_i(mispredict_lo)
       ,.fetch_pc_o(fetch_pc_lo)
-      ,.inst_o(inst_lo)
+      ,.inst_o(fetch_inst_lo)
+      ..inst_v_o(fetch_inst_v_lo)
       );
 
   // Configuration Bus Microcode Data output
@@ -217,52 +253,106 @@ module bp_cce
     #(.width_p(cce_pc_width_p)
       )
     inst_predecode
-     (.inst_i(inst_lo)
-      ,.fetch_pc_i(fetch_pc_lo)
-      //,.predict_taken_o(predict_taken_lo)
-      ,.predicted_fetch_pc_o(predicted_fetch_pc_lo)
+     (.inst_i(fetch_inst_lo)
+      ,.pc_i(fetch_pc_lo)
+      ,.predicted_next_pc_o(predicted_fetch_pc_lo)
       );
 
-  // Decode/Execute Stage
-
-
-  // Performance monitor
-  // TODO: define a set of signals that can be counted (will increment every cycle if condition set)
-  // Define instructions that can set, clear, and read counters to GPR
   /*
-  bp_cce_perfmon
-    #()
-    performance_monitor
-     (.clk_i(clk_i)
-      ,.reset_i(reset_i)
-      // TODO: input signals
-      // TODO: counter outputs
-      );
-  */
+   * Decode/Execute Stage
+   */
 
   // Instruction Decode
-  // TODO: the decoded instruction output provides the intent (i.e., what the instruction would do if executed)
-  // to the rest of the CCE. The inst_stall unit consumes the decoded instruction and then determines if the action
-  // can take place depending on data or structural hazards, etc. The instruction only affects the architectural
-  // state of the CCE and has any effect if no stall is detected.
   bp_cce_inst_decode
     #(.cce_pc_width_p(cce_pc_width_p)
       )
     inst_decode
      (.clk_i(clk_i)
       ,.reset_i(reset_i)
-      ,.inst_i(inst_lo)
+      ,.inst_i(fetch_inst_lo)
       ,.pc_i(fetch_pc_lo)
-      // TODO: instruction valid signal - probably from inst_ram?
-      ,.inst_v_i()
+      ,.inst_v_i(fetch_inst_v_lo)
+      ,.stall_i(stall_lo)
+      ,.mispredict_i(mispredict_lo)
       ,.decoded_inst_o(decoded_inst_lo)
       ,.pc_o(ex_pc_lo)
       );
 
+  // ALU
+  bp_cce_alu
+    #(.width_p(`bp_cce_inst_gpr_width)
+      )
+    alu
+     (.opd_a_i(src_a)
+      ,.opd_b_i(src_b)
+      ,.alu_op_i(decoded_inst_lo.alu_op)
+      ,.res_o(alu_res_lo)
+      );
+
+  // Branch Unit
+  bp_cce_branch
+    #(.width_p(`bp_cce_inst_gpr_width)
+      ,.cce_pc_width_p(cce_pc_width_p)
+      )
+    branch
+     (.opd_a_i(src_a)
+      ,.opd_b_i(src_b)
+      ,.branch_i(decoded_inst_lo.branch)
+      ,.predicted_taken_i(decoded_inst_lo.predict_taken)
+      ,.branch_op_i(decoded_inst_lo.branch_op)
+      ,.execute_pc_i(ex_pc_lo)
+      ,.branch_target_i(decoded_inst_lo.branch_target)
+      ,.branch_res_o(branch_res_lo)
+      ,.mispredict_o(mispredict_lo)
+      ,.pc_o(branch_resolution_pc_lo)
+      );
+
+
+  // Source Select
+  bp_cce_src_sel
+    #(.bp_params_p(bp_params_p)
+     )
+    source_selector
+     (.src_a_sel_i(decoded_inst_lo.src_a_sel)
+      ,.src_a_i(decoded_inst_lo.src_a)
+      ,.src_b_sel_i(decoded_inst_lo.src_b_sel)
+      ,.src_b_i(decoded_inst_lo.src_b)
+      ,.addr_sel_i(decoded_inst_lo.addr_sel)
+      ,.lce_sel_i(decoded_inst_lo.lce_sel)
+      ,.way_sel_i(decoded_inst_lo.way_sel)
+      ,.lru_way_sel_i(decoded_inst_lo.lru_way_sel)
+      ,.coh_state_sel_i(decoded_inst_lo.coh_state_sel)
+      ,.cfg_bus_i(cfg_bus_i)
+      ,.mshr_i(mshr_lo)
+      ,.gpr_i(gpr_lo)
+      ,.imm_i(decoded_inst_lo.imm)
+      ,.auto_fwd_msg_i(auto_fwd_msg_lo)
+      ,.coh_state_default_i(coh_state_default_lo)
+      ,.sharers_hits_i(sharers_hits_lo)
+      ,.sharers_ways_i(sharers_ways_lo)
+      ,.sharers_coh_states_i(sharers_coh_states_lo)
+      ,.mem_resp_v_i(mem_resp_v_i)
+      ,.lce_resp_v_i(lce_resp_v_i)
+      ,.lce_req_v_i(lce_req_v_i)
+      ,.lce_resp_type_i(lce_resp.msg_type)
+      ,.mem_resp_type_i(mem_resp.msg_type)
+      ,.src_a_o(src_a)
+      ,.src_b_o(src_b)
+      ,.addr_o(addr_lo)
+      ,.lce_o(lce_lo)
+      ,.way_o(lru_way_lo)
+      ,.state_o(state_lo)
+      );
+
+
+
+
+
+
   // Instruction Stall Detection
   // TODO: this logic must be fast. No long paths should exist and a stall needs to be detected based on the 
   bp_cce_inst_stall
-    #(.cnt_width_p(64)
+    #(.cnt_width_p(counter_width_lp)
       )
     inst_stall
      (.clk_i(clk_i)
@@ -304,34 +394,6 @@ module bp_cce
   // - Normal Mode Message Tx/Rx
   // - Uncached Only Mode Message Tx/Rx
 
-  // ALU
-  bp_cce_alu
-    #(.width_p(`bp_cce_inst_gpr_width)
-      )
-    alu
-     (.opd_a_i(src_a)
-      ,.opd_b_i(src_b)
-      ,.alu_op_i(decoded_inst_lo.alu_op)
-      ,.res_o(alu_res_lo)
-      );
-
-  // Branch Unit
-  bp_cce_branch
-    #(.width_p(`bp_cce_inst_gpr_width)
-      ,.cce_pc_width_p(cce_pc_width_p)
-      )
-    branch
-     (.opd_a_i(src_a)
-      ,.opd_b_i(src_b)
-      ,.branch_i(decoded_inst_lo.branch)
-      ,.predicted_taken_i(decoded_inst_lo.predict_taken)
-      ,.branch_op_i(decoded_inst_lo.branch_op)
-      ,.execute_pc_i(ex_pc_lo)
-      ,.branch_target_i(decoded_inst_lo.branch_target)
-      ,.branch_res_o(branch_res_lo)
-      ,.mispredict_o(branch_mispredict_lo)
-      ,.pc_o(branch_resolution_pc_lo)
-      );
 
   // Pending Bits
   logic pending_li, pending_lo;
@@ -354,17 +416,28 @@ module bp_cce
       ,.pending_o(pending_lo)
       );
 
+
+
+  // Performance monitor
+  // TODO: define a set of signals that can be counted (will increment every cycle if condition set)
+  // Define instructions that can set, clear, and read counters to GPR
+  /*
+  bp_cce_perfmon
+    #()
+    performance_monitor
+     (.clk_i(clk_i)
+      ,.reset_i(reset_i)
+      // TODO: input signals
+      // TODO: counter outputs
+      );
+  */
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-  // TODO: these should come from src_sel outputs
-  logic [lg_lce_sets_lp-1:0] dir_set_li;
-  logic [lg_num_lce_lp-1:0] dir_lce_li;
-  logic [lg_lce_assoc_lp-1:0] dir_way_li;
-  logic [tag_width_lp-1:0] dir_tag_li;
-  logic [`bp_coh_bits-1:0] dir_coh_state_li;
-
+  // TODO: pending bit write arbitration
   // Pending Bit Signals
   logic pending_lo;
   logic pending_v_lo;
@@ -372,7 +445,6 @@ module bp_cce
   logic pending_w_v_li, pending_w_v_from_msg;
   logic [lg_num_way_groups_lp-1:0] pending_w_way_group_li, pending_r_way_group_li, pending_w_way_group_from_msg;
   assign pending_r_way_group_li = dir_set_li;
-
   // WDP write is valid if instruction pending_w_v is set (WDP op) and decoder is not stalling
   // the instruction (due to mem data resp writing pending bit)
   logic wdp_pending_w_v;
@@ -394,29 +466,6 @@ module bp_cce
   logic [lg_num_lce_lp-1:0]                      inv_dir_lce_lo;
   logic [lg_lce_assoc_lp-1:0]                    inv_dir_way_lo;
 
-
-  // convert address (excluding block offset bits) into CCE local set index
-  // TODO: for now, there is a 1:1 ratio of sets stored in directory and way groups
-  // - when this changes, or when adding support for multiple LCE organizations, one bsg_hash_bank
-  //   will be needed to map address to way group, and one per directory to map address to LCE set
-  logic [lg_num_cce_lp-1:0] cce_dst_id_lo;
-  localparam hash_index_width_lp=$clog2((2**lg_lce_sets_lp+num_cce_p-1)/num_cce_p);
-  logic [hash_index_width_lp-1:0] cce_set_id_lo;
-  logic [paddr_width_p-1:0] hash_addr_li;
-  assign hash_addr_li =
-    (decoded_inst_lo.dir_way_group_sel == e_dir_wg_sel_req_addr) ? mshr.paddr : mshr.lru_paddr;
-  wire [lg_lce_sets_lp-1:0] hash_addr_rev =
-    {<< {hash_addr_li[lg_block_size_in_bytes_lp+:lg_lce_sets_lp]}};
-
-  bsg_hash_bank
-    #(.banks_p(num_cce_p) // number of CCE's to spread way groups over
-      ,.width_p(lg_lce_sets_lp) // width of address input
-      )
-    addr_to_cce_id
-     (.i(hash_addr_rev)
-      ,.bank_o(cce_dst_id_lo)
-      ,.index_o(cce_set_id_lo)
-      );
 
   // Directory
   bp_cce_dir

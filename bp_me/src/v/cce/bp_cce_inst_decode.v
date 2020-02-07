@@ -4,9 +4,21 @@
  *   bp_cce_inst_decode.v
  *
  * Description:
- *   The decoder holds the decode+execute stage PC and raw instruction. The decoder also
+ *   The decoder holds the decode+execute stage PC, instruction, and valid bit. The decoder also
  *   contains the instruction decode logic and outputs the decoded instruction used to control
  *   all of the other modules in the CCE.
+ *
+ *   The decoder does not check if the instruction can actually be executed, rather it outputs
+ *   the instruction assuming it will be executed. The stall unit and other arbitration logic
+ *   in the CCE will nullify the instruction if it cannot be executed this cycle. The decoder
+ *   is informed of this through the stall_i signal, which causes the current PC, instruction,
+ *   and valid bit to be retained at the end of the cycle. The current instruction is then
+ *   replayed next cycle.
+ *
+ *   A mispredict event detected by the branch unit causes the next instruction to be invalid
+ *   since the Fetch stage must re-direct instruction fetch. The instruction being produced
+ *   by Fetch when a mispredict is detected becomes invalid and therefore there is a 1 cycle
+ *   bubble/penalty for a mispredicted branch.
  *
  */
 
@@ -14,7 +26,7 @@ module bp_cce_inst_decode
   import bp_common_pkg::*;
   import bp_cce_pkg::*;
   import bp_me_pkg::*;
-  #(parameter cce_width_p = "inv"
+  #(parameter cce_pc_width_p = "inv"
   )
   (input                                         clk_i
    , input                                       reset_i
@@ -23,6 +35,12 @@ module bp_cce_inst_decode
    , input bp_cce_inst_s                         inst_i
    , input [cce_pc_width_p-1:0]                  pc_i
    , input                                       inst_v_i
+
+   // Stall signal from stall detection unit
+   , input                                       stall_i
+
+   // Mispredict signal from branch unit
+   , input                                       mispredict_i
 
    // Decoded instruction
    , output bp_cce_inst_decoded_s                decoded_inst_o
@@ -33,7 +51,7 @@ module bp_cce_inst_decode
 
   // Execute Stage Instruction Register and PC
   bp_cce_inst_s inst_r, inst_n;
-  logic [cce_width_p-1:0] ex_pc_r, ex_pc_n;
+  logic [cce_pc_width_p-1:0] ex_pc_r, ex_pc_n;
   logic inst_v_r, inst_v_n;
   always_ff @(posedge clk_i) begin
     if (reset_i) begin
@@ -48,22 +66,42 @@ module bp_cce_inst_decode
   end
 
   always_comb begin
-    inst_n = inst_i;
-    ex_pc_n = pc_i;
-    inst_v_n = inst_v_i;
+
+    // Next instruction determination
+
+    // The next instruction and its PC that will be seen by the Execute stage comes from
+    // the output of the instruction RAM and the fetch_pc register in bp_cce_inst_ram.
+    inst_n = stall_i ? inst_r : inst_i;
+    ex_pc_n = stall_i ? ex_pc_r : pc_i;
+    // The next instruction is valid as long as there was not a mispredict detected in the
+    // Execute stage. A mispredict squashes the next instruction, by setting the valid bit
+    // to 0 for the next cycle, which then gates off the decoder next cycle.
+    // If the current instruction stalls (which is detected after decoding due to interactions
+    // between the current ucode instruction and resource conflicts with functional units),
+    // the stall signal is sent back to the Fetch stage and the current instruction, PC, and
+    // valid bit are retained for the next cycle. The stall signal also causes the valid
+    // bit to hold its state.
+    inst_v_n = stall_i
+               ? inst_v_r
+               : mispredict_i
+                 ? 1'b0
+                 : inst_v_i;
+
+
+    // Current instruction decoding
 
     pc_o = ex_pc_r;
 
     decoded_inst_o = '0;
     decoded_inst_o.v = inst_v_r;
 
-    // only finish decoding if instruction is valid
+    // only finish decoding if current instruction is valid
     if (inst_v_r) begin
-      decoded_inst_o.branch = inst_i.branch;
-      decoded_inst_o.predict_taken = inst_i.predict_taken;
+      decoded_inst_o.branch = inst_r.branch;
+      decoded_inst_o.predict_taken = inst_r.predict_taken;
 
-      decoded_inst_o.op = inst_i.op;
-      decoded_inst_o.minor_op_u = inst_i.minor_op_u;
+      decoded_inst_o.op = inst_r.op;
+      decoded_inst_o.minor_op_u = inst_r.minor_op_u;
 
       // TODO: decoder
     end
@@ -154,7 +192,7 @@ module bp_cce_inst_decode
         decoded_inst_o.branch_v = 1'b1;
         // Next PC computation
         decoded_inst_o.imm[0+:`bp_cce_inst_imm16_width] = branch_op_s.imm;
-        pc_branch_target_o = branch_op_s.target[0+:cce_width_p];
+        pc_branch_target_o = branch_op_s.target[0+:cce_pc_width_p];
 
         // Default to GPR sources
         decoded_inst_o.src_a.gpr = branch_op_s.src_a.gpr;
