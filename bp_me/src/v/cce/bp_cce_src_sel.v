@@ -22,8 +22,15 @@ module bp_cce_src_sel
 
     // Derived parameters
     , localparam mshr_width_lp = `bp_cce_mshr_width(lce_id_width_p, lce_assoc_p, paddr_width_p)
-    , localparam lce_assoc_width_lp = `BSG_SAFE_CLOG2(lce_max_assoc_p)
     , localparam cfg_bus_width_lp = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
+
+    , localparam lce_assoc_width_lp = `BSG_SAFE_CLOG2(lce_max_assoc_p)
+    // number of way groups managed by this CCE
+    , localparam num_way_groups_lp         = ((cce_way_groups_p % num_cce_p) == 0)
+                                             ? (cce_way_groups_p/num_cce_p)
+                                             : ((cce_way_groups_p/num_cce_p) + 1)
+    , localparam lg_num_way_groups_lp      = `BSG_SAFE_CLOG2(num_way_groups_lp)
+
   )
   (// Select signals for src_a and src_b - from decoded instruction
    input bp_cce_inst_src_sel_e                   src_a_sel_i

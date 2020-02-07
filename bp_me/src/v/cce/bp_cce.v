@@ -8,6 +8,13 @@
  *
  */
 
+// Common TODO items for all of CCE
+// 1. num_way_groups calculations
+// 2. lce_assoc_p use and lg_lce_assoc_lp
+// 3. lce_sets_p
+// 4. tag_width_lp
+
+
 module bp_cce
   import bp_common_pkg::*;
   import bp_common_aviary_pkg::*;
@@ -19,16 +26,7 @@ module bp_cce
 
     // Derived parameters
     , localparam block_size_in_bytes_lp    = (cce_block_width_p/8)
-    , localparam lg_num_lce_lp             = `BSG_SAFE_CLOG2(num_lce_p)
-    , localparam lg_num_cce_lp             = `BSG_SAFE_CLOG2(num_cce_p)
     , localparam lg_block_size_in_bytes_lp = `BSG_SAFE_CLOG2(block_size_in_bytes_lp)
-
-    // TODO: these values will not be constant for all LCEs in new system with varying
-    // organizations for I$, D$, A$
-    , localparam lg_lce_assoc_lp           = `BSG_SAFE_CLOG2(lce_assoc_p)
-    , localparam lg_lce_sets_lp            = `BSG_SAFE_CLOG2(lce_sets_p)
-    , localparam tag_width_lp              = (paddr_width_p-lg_lce_sets_lp
-                                              -lg_block_size_in_bytes_lp)
 
     // bits for total number of way groups in the system
     , localparam lg_cce_way_groups_lp      = `BSG_SAFE_CLOG2(cce_way_groups_p)
@@ -42,9 +40,23 @@ module bp_cce
     , localparam cfg_bus_width_lp          = `bp_cfg_bus_width(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p)
 
     // interface widths
-    `declare_bp_lce_cce_if_header_widths(cce_id_width_p, lce_id_width_p, lce_assoc_p, paddr_width_p)
-    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, dword_width_p, cce_block_width_p)
-    `declare_bp_me_if_widths(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p)
+    `declare_bp_lce_cce_if_header_widths(cce_id_width_p, lce_id_width_p, lce_max_assoc_p, paddr_width_p)
+    `declare_bp_lce_cce_if_widths(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_max_assoc_p, dword_width_p, cce_block_width_p)
+    `declare_bp_me_if_widths(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_max_assoc_p)
+
+    // TODO:
+    // In most cases, use cce_id_width_p and lce_id_width_p instead of these.
+    , localparam lg_num_lce_lp             = `BSG_SAFE_CLOG2(num_lce_p)
+    , localparam lg_num_cce_lp             = `BSG_SAFE_CLOG2(num_cce_p)
+
+    // TODO: these values will not be constant for all LCEs in new system with varying
+    // organizations for I$, D$, A$
+    , localparam lg_lce_assoc_lp           = `BSG_SAFE_CLOG2(lce_assoc_p)
+    , localparam lg_lce_sets_lp            = `BSG_SAFE_CLOG2(lce_sets_p)
+    , localparam tag_width_lp              = (paddr_width_p-lg_lce_sets_lp
+                                              -lg_block_size_in_bytes_lp)
+
+
   )
   (input                                               clk_i
    , input                                             reset_i
@@ -115,23 +127,69 @@ module bp_cce
   //synopsys translate_on
 
   // LCE-CCE and Mem-CCE Interface
-  `declare_bp_me_if(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_assoc_p);
-  `declare_bp_lce_cce_if(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_assoc_p, dword_width_p, cce_block_width_p);
+  `declare_bp_me_if(paddr_width_p, cce_block_width_p, lce_id_width_p, lce_max_assoc_p);
+  `declare_bp_lce_cce_if(cce_id_width_p, lce_id_width_p, paddr_width_p, lce_max_assoc_p, dword_width_p, cce_block_width_p);
 
   // Config Interface
   `declare_bp_cfg_bus_s(vaddr_width_p, core_id_width_p, cce_id_width_p, lce_id_width_p, cce_pc_width_p, cce_instr_width_p);
   bp_cfg_bus_s cfg_bus_cast_i;
   assign cfg_bus_cast_i = cfg_bus_i;
 
+  // Message casting
+  bp_lce_cce_req_header_s  lce_req;
+  bp_lce_cce_resp_header_s lce_resp;
+  bp_lce_cmd_header_s      lce_cmd;
+  bp_cce_mem_msg_header_s  mem_cmd, mem_resp;
+  assign lce_req   = lce_req_i;
+  assign lce_resp  = lce_resp_i;
+  assign lce_cmd_o = lce_cmd;
+  assign mem_cmd_o = mem_cmd;
+  assign mem_resp  = mem_resp_i;
+
+  // MSHR register output signal
+  `declare_bp_cce_mshr_s(lce_id_width_p, lce_max_assoc_p, paddr_width_p);
+  bp_cce_mshr_s mshr;
+
   // Inter-module signals
-  bp_cce_inst_s inst_lo;
-  bp_cce_inst_decoded_s decoded_inst_lo;
-  logic [cce_pc_width_p-1:0] ex_pc_lo;
-  logic [cce_pc_width_p-1:0] fetch_pc_lo, predicted_fetch_pc_lo, branch_resolution_pc_lo;
-  logic stall_lo, mispredict_lo;
-  //logic predict_taken_lo;
-  logic [`bp_cce_inst_gpr_width-1:0] alu_src_a, alu_src_b, alu_res_lo;
-  logic branch_res_lo, branch_mispredict_lo;
+  bp_cce_inst_s                        inst_lo;
+  bp_cce_inst_decoded_s                decoded_inst_lo;
+  logic [cce_pc_width_p-1:0]           ex_pc_lo;
+  logic [cce_pc_width_p-1:0]           fetch_pc_lo, predicted_fetch_pc_lo, branch_resolution_pc_lo;
+  logic                                stall_lo, mispredict_lo;
+  //logic predict_taken_lo; // TODO: may be unused
+  logic                                branch_res_lo, branch_mispredict_lo;
+  logic [`bp_cce_inst_gpr_width-1:0]   src_a, src_b, alu_res_lo;
+  logic [paddr_width_p-1:0]            addr_lo;
+  logic [lce_id_width_p-1:0]           lce_lo;
+  logic [lce_assoc_width_lp-1:0]       way_lo, lru_way_lo;
+  bp_coh_states_e                      state_lo;
+
+  logic dir_busy_lo;
+  logic sharers_v_lo;
+  logic [num_lce_p-1:0] sharers_hits_lo;
+  logic [num_lce_p-1:0][lce_assoc_width_lp-1:0] sharers_ways_lo;
+  bp_coh_states_e [num_lce_p-1:0] sharers_coh_states_lo;
+  logic dir_addr_v_lo, dir_lru_v_lo;
+  logic dir_lru_cached_excl_lo;
+  logic [paddr_width_p-1:0] dir_addr_lo, dir_lru_addr_lo;
+
+  logic [lce_assoc_widthlp-1:0] gad_req_addr_way_lo;
+  logic gad_transfer_flag_lo;
+  logic [lce_id_width_p-1:0] gad_owner_lce_lo;
+  logic [lce_assoc_width_lp-1:0] gad_owner_way_lo;
+  logic gad_replacement_flag_lo;
+  logic gad_upgrade_flag_lo;
+  logic gad_invalidate_flag_lo;
+  logic gad_cached_flag_lo;
+  logic gad_cached_exclusive_flag_lo;
+  logic gad_cached_owned_flag_lo;
+  logic gad_cached_dirty_flag_lo;
+
+  logic [`bp_cce_inst_num_gpr-1:0][`bp_cce_inst_gpr_width-1:0] gpr_lo;
+  bp_coh_states_e coh_state_default_lo;
+
+
+
 
   // Fetch Stage
 
@@ -246,29 +304,25 @@ module bp_cce
   // - Normal Mode Message Tx/Rx
   // - Uncached Only Mode Message Tx/Rx
 
-  // TODO: alu_src_a/b will be same as branch_src_a/b
-
   // ALU
   bp_cce_alu
     #(.width_p(`bp_cce_inst_gpr_width)
       )
     alu
-     (.opd_a_i(alu_src_a)
-      ,.opd_b_i(alu_src_b)
+     (.opd_a_i(src_a)
+      ,.opd_b_i(src_b)
       ,.alu_op_i(decoded_inst_lo.alu_op)
       ,.res_o(alu_res_lo)
       );
 
   // Branch Unit
-  // TODO: what should width_p be? Probably only need 16-bits or so
-  // except...GPR comparisons use full GPR width
   bp_cce_branch
     #(.width_p(`bp_cce_inst_gpr_width)
       ,.cce_pc_width_p(cce_pc_width_p)
       )
     branch
-     (.opd_a_i(branch_src_a)
-      ,.opd_b_i(branch_src_b)
+     (.opd_a_i(src_a)
+      ,.opd_b_i(src_b)
       ,.branch_i(decoded_inst_lo.branch)
       ,.predicted_taken_i(decoded_inst_lo.predict_taken)
       ,.branch_op_i(decoded_inst_lo.branch_op)
@@ -304,47 +358,7 @@ module bp_cce
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-  bp_lce_cce_req_s  lce_req_li;
-  bp_lce_cce_resp_s lce_resp_li;
-  bp_lce_cmd_s      lce_cmd_lo;
-
-  bp_cce_mem_msg_s  mem_cmd_lo, mem_resp_li;
-
-  // assign output queue ports to structure variables
-  assign lce_cmd_o = lce_cmd_lo;
-  assign mem_cmd_o = mem_cmd_lo;
-
-  // cast input messages with data
-  assign mem_resp_li = mem_resp_i;
-  assign lce_resp_li = lce_resp_i;
-  assign lce_req_li = lce_req_i;
-
-  // PC to Decode signals
-  logic [`bp_cce_inst_width-1:0] pc_inst_lo;
-  logic pc_inst_v_lo;
-
-  // Decode to PC signals
-  logic pc_stall_lo;
-  logic [inst_ram_addr_width_lp-1:0] pc_branch_target_lo;
-
-  // ALU signals
-  logic alu_branch_res_lo;
-  logic [`bp_cce_inst_gpr_width-1:0] src_a, src_b, alu_res_lo;
-
-  // Instruction Decode signals
-  bp_cce_inst_decoded_s decoded_inst_lo;
-  logic decoded_inst_v_lo;
-
-  // Directory signals
-  logic sharers_v_lo;
-  logic [num_lce_p-1:0] sharers_hits_lo;
-  logic [num_lce_p-1:0][lg_lce_assoc_lp-1:0] sharers_ways_lo;
-  logic [num_lce_p-1:0][`bp_coh_bits-1:0] sharers_coh_states_lo;
-  logic dir_lru_v_lo;
-  logic dir_lru_cached_excl_lo;
-  logic [tag_width_lp-1:0] dir_lru_tag_lo, dir_tag_lo;
-  logic dir_busy_lo;
-
+  // TODO: these should come from src_sel outputs
   logic [lg_lce_sets_lp-1:0] dir_set_li;
   logic [lg_num_lce_lp-1:0] dir_lce_li;
   logic [lg_lce_assoc_lp-1:0] dir_way_li;
@@ -367,31 +381,9 @@ module bp_cce
   assign pending_w_v_li = (wdp_pending_w_v) ? decoded_inst_lo.pending_w_v : pending_w_v_from_msg;
   assign pending_w_way_group_li = (wdp_pending_w_v) ? dir_set_li : pending_w_way_group_from_msg;
 
-  // GAD signals
-  logic gad_v_li;
-
-  logic [lg_lce_assoc_lp-1:0] gad_req_addr_way_lo;
-  logic [lg_num_lce_lp-1:0] gad_transfer_lce_lo;
-  logic [lg_lce_assoc_lp-1:0] gad_transfer_lce_way_lo;
-  logic gad_transfer_flag_lo;
-  logic gad_replacement_flag_lo;
-  logic gad_upgrade_flag_lo;
-  logic gad_invalidate_flag_lo;
-  logic gad_cached_flag_lo;
-  logic gad_cached_exclusive_flag_lo;
-  logic gad_cached_owned_flag_lo;
-  logic gad_cached_dirty_flag_lo;
-
   // Register signals
-  `declare_bp_cce_mshr_s(lce_id_width_p, lce_assoc_p, paddr_width_p);
-  bp_cce_mshr_s mshr;
-
   logic null_wb_flag_li;
   assign null_wb_flag_li = (lce_resp_v_i & (lce_resp_li.msg_type == e_lce_cce_resp_null_wb));
-
-  logic [`bp_cce_inst_num_gpr-1:0][`bp_cce_inst_gpr_width-1:0] gpr_r_lo;
-  logic [dword_width_p-1:0] nc_data_r_lo;
-  logic [`bp_coh_bits-1:0] coh_state_r_lo;
 
   // Message Unit Signals
   logic                                          fence_zero_lo;
@@ -470,7 +462,7 @@ module bp_cce
   // GAD logic - auxiliary directory information logic
   bp_cce_gad
     #(.num_lce_p(num_lce_p)
-      ,.lce_assoc_p(lce_assoc_p)
+      ,.lce_assoc_p(lce_max_assoc_p)
       )
     gad
      (.clk_i(clk_i)
@@ -600,109 +592,9 @@ module bp_cce
       );
 
 
-  // Directory source selects
-  always_comb
-  begin
-    case (decoded_inst_lo.dir_way_group_sel)
-      e_dir_wg_sel_r0: begin
-        dir_set_li = gpr_r_lo[e_gpr_r0][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r1: begin
-        dir_set_li = gpr_r_lo[e_gpr_r1][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r2: begin
-        dir_set_li = gpr_r_lo[e_gpr_r2][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r3: begin
-        dir_set_li = gpr_r_lo[e_gpr_r3][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r4: begin
-        dir_set_li = gpr_r_lo[e_gpr_r4][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r5: begin
-        dir_set_li = gpr_r_lo[e_gpr_r5][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r6: begin
-        dir_set_li = gpr_r_lo[e_gpr_r6][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_r7: begin
-        dir_set_li = gpr_r_lo[e_gpr_r7][lg_lce_sets_lp-1:0];
-      end
-      e_dir_wg_sel_req_addr: begin
-        dir_set_li[0+:hash_index_width_lp] = cce_set_id_lo;
-      end
-      e_dir_wg_sel_lru_way_addr: begin
-        dir_set_li[0+:hash_index_width_lp] = cce_set_id_lo;
-      end
-      default: begin
-        dir_set_li = '0;
-      end
-    endcase
-    case (decoded_inst_lo.dir_lce_sel)
-      e_dir_lce_sel_r0: dir_lce_li = gpr_r_lo[e_gpr_r0][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r1: dir_lce_li = gpr_r_lo[e_gpr_r1][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r2: dir_lce_li = gpr_r_lo[e_gpr_r2][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r3: dir_lce_li = gpr_r_lo[e_gpr_r3][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r4: dir_lce_li = gpr_r_lo[e_gpr_r4][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r5: dir_lce_li = gpr_r_lo[e_gpr_r5][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r6: dir_lce_li = gpr_r_lo[e_gpr_r6][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_r7: dir_lce_li = gpr_r_lo[e_gpr_r7][lg_num_lce_lp-1:0];
-      e_dir_lce_sel_req_lce: dir_lce_li = mshr.lce_id;
-      e_dir_lce_sel_transfer_lce: dir_lce_li = mshr.tr_lce_id;
-      e_dir_lce_sel_inv: dir_lce_li = inv_dir_lce_lo;
-      default: dir_lce_li = '0;
-    endcase
-    case (decoded_inst_lo.dir_way_sel)
-      e_dir_way_sel_r0: dir_way_li = gpr_r_lo[e_gpr_r0][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r1: dir_way_li = gpr_r_lo[e_gpr_r1][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r2: dir_way_li = gpr_r_lo[e_gpr_r2][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r3: dir_way_li = gpr_r_lo[e_gpr_r3][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r4: dir_way_li = gpr_r_lo[e_gpr_r4][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r5: dir_way_li = gpr_r_lo[e_gpr_r5][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r6: dir_way_li = gpr_r_lo[e_gpr_r6][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_r7: dir_way_li = gpr_r_lo[e_gpr_r7][lg_lce_assoc_lp-1:0];
-      e_dir_way_sel_req_addr_way: dir_way_li = mshr.way_id;
-      e_dir_way_sel_lru_way_addr_way: dir_way_li = mshr.lru_way_id;
-      e_dir_way_sel_sh_way_r0: dir_way_li = sharers_ways_lo[gpr_r_lo[e_gpr_r0][lg_num_lce_lp-1:0]];
-      e_dir_way_sel_inv: dir_way_li = inv_dir_way_lo;
-      default: dir_way_li = '0;
-    endcase
-    case (decoded_inst_lo.dir_coh_state_sel)
-      e_dir_coh_sel_r0: dir_coh_state_li = gpr_r_lo[e_gpr_r0][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r1: dir_coh_state_li = gpr_r_lo[e_gpr_r1][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r2: dir_coh_state_li = gpr_r_lo[e_gpr_r2][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r3: dir_coh_state_li = gpr_r_lo[e_gpr_r3][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r4: dir_coh_state_li = gpr_r_lo[e_gpr_r4][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r5: dir_coh_state_li = gpr_r_lo[e_gpr_r5][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r6: dir_coh_state_li = gpr_r_lo[e_gpr_r6][`bp_coh_bits-1:0];
-      e_dir_coh_sel_r7: dir_coh_state_li = gpr_r_lo[e_gpr_r7][`bp_coh_bits-1:0];
-      e_dir_coh_sel_next_coh_st: dir_coh_state_li = mshr.next_coh_state;
-      e_dir_coh_sel_inst_imm: dir_coh_state_li = decoded_inst_lo.imm[`bp_coh_bits-1:0];
-      default: dir_coh_state_li = '0;
-    endcase
-    case (decoded_inst_lo.dir_tag_sel)
-      e_dir_tag_sel_r0: dir_tag_li = gpr_r_lo[e_gpr_r0][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r1: dir_tag_li = gpr_r_lo[e_gpr_r1][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r2: dir_tag_li = gpr_r_lo[e_gpr_r2][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r3: dir_tag_li = gpr_r_lo[e_gpr_r3][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r4: dir_tag_li = gpr_r_lo[e_gpr_r4][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r5: dir_tag_li = gpr_r_lo[e_gpr_r5][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r6: dir_tag_li = gpr_r_lo[e_gpr_r6][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_r7: dir_tag_li = gpr_r_lo[e_gpr_r7][paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_req_addr: dir_tag_li = mshr.paddr[paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_lru_way_addr: dir_tag_li = mshr.lru_paddr[paddr_width_p-1 -: tag_width_lp];
-      e_dir_tag_sel_const_0: dir_tag_li = '0;
-      default: dir_tag_li = '0;
-    endcase
-  end
 
-  // ALU
-  logic sharers_hits_r0;
-  assign sharers_hits_r0 = sharers_hits_lo[gpr_r_lo[e_gpr_r0][lg_num_lce_lp-1:0]];
-  logic [lg_lce_assoc_lp-1:0] sharers_ways_r0;
-  assign sharers_ways_r0 = sharers_ways_lo[gpr_r_lo[e_gpr_r0][lg_num_lce_lp-1:0]];
-  logic [`bp_coh_bits-1:0] sharers_coh_states_r0;
-  assign sharers_coh_states_r0 = sharers_coh_states_lo[gpr_r_lo[e_gpr_r0][lg_num_lce_lp-1:0]];
+  // TODO: ensure branch flag operations are implemented/decoded properly
+  // Especially setup of their sources
 
   // Branch multiple-flag operands
   // Apply bit-mask from instruction to MSHR flags register
@@ -713,153 +605,5 @@ module bp_cce
   assign bf_and = (bf_opd == decoded_inst_lo.imm[0+:`bp_cce_inst_num_flags]);
   // Any flag is set (OR) if at least one bit is set in the masked flags
   assign bf_or = |bf_opd;
-
-  always_comb
-  begin
-
-    // ALU operand a select
-    src_a = '0;
-    case (decoded_inst_lo.src_a_sel)
-      e_src_sel_gpr: begin
-        case (decoded_inst_lo.src_a.gpr)
-          e_src_r0: src_a = gpr_r_lo[e_gpr_r0];
-          e_src_r1: src_a = gpr_r_lo[e_gpr_r1];
-          e_src_r2: src_a = gpr_r_lo[e_gpr_r2];
-          e_src_r3: src_a = gpr_r_lo[e_gpr_r3];
-          e_src_r4: src_a = gpr_r_lo[e_gpr_r4];
-          e_src_r5: src_a = gpr_r_lo[e_gpr_r5];
-          e_src_r6: src_a = gpr_r_lo[e_gpr_r6];
-          e_src_r7: src_a = gpr_r_lo[e_gpr_r7];
-          e_src_gpr_imm: src_a = decoded_inst_lo.imm;
-          default: src_a = '0;
-        endcase
-      end
-      e_src_sel_flag: begin
-        case (decoded_inst_lo.src_a.flag)
-          e_src_rqf: src_a[0] = mshr.flags[e_flag_sel_rqf];
-          e_src_ucf: src_a[0] = mshr.flags[e_flag_sel_ucf];
-          e_src_nerf: src_a[0] = mshr.flags[e_flag_sel_nerf];
-          e_src_ldf: src_a[0] = mshr.flags[e_flag_sel_ldf];
-          e_src_pf: src_a[0] = mshr.flags[e_flag_sel_pf];
-          e_src_lef: src_a[0] = mshr.flags[e_flag_sel_lef];
-          e_src_cf: src_a[0] = mshr.flags[e_flag_sel_cf];
-          e_src_cef: src_a[0] = mshr.flags[e_flag_sel_cef];
-          e_src_cof: src_a[0] = mshr.flags[e_flag_sel_cof];
-          e_src_cdf: src_a[0] = mshr.flags[e_flag_sel_cdf];
-          e_src_tf: src_a[0] = mshr.flags[e_flag_sel_tf];
-          e_src_rf: src_a[0] = mshr.flags[e_flag_sel_rf];
-          e_src_uf: src_a[0] = mshr.flags[e_flag_sel_uf];
-          e_src_if: src_a[0] = mshr.flags[e_flag_sel_if];
-          e_src_nwbf: src_a[0] = mshr.flags[e_flag_sel_nwbf];
-          e_src_sf: src_a[0] = mshr.flags[e_flag_sel_sf];
-          e_src_flag_and: src_a[0] = bf_and;
-          e_src_flag_nand: src_a[0] = ~bf_and;
-          e_src_flag_or: src_a[0] = bf_or;
-          e_src_flag_nor: src_a[0] = ~bf_or;
-          e_src_flag_imm: src_a = decoded_inst_lo.imm;
-          default: src_a = '0;
-        endcase
-      end
-      e_src_sel_special: begin
-        case (decoded_inst_lo.src_a.special)
-          e_src_sharers_hit_r0: src_a[0] = sharers_hits_r0;
-          e_src_sharers_way_r0: src_a[0+:lg_lce_assoc_lp] = sharers_ways_r0;
-          e_src_sharers_state_r0: src_a[0+:`bp_coh_bits] = sharers_coh_states_r0;
-          e_src_req_lce: src_a[0+:lg_num_lce_lp] = mshr.lce_id;
-          e_src_next_coh_state: src_a[0+:`bp_coh_bits] = mshr.next_coh_state;
-          e_src_coh_state: src_a[0+:`bp_coh_bits] = coh_state_r_lo;
-          e_src_num_lce: src_a[0+:lg_num_lce_lp+1] = num_lce_p[0+:lg_num_lce_lp+1];
-          e_src_req_addr: src_a[0+:paddr_width_p] = mshr.paddr;
-          e_src_num_cce: src_a[0+:lg_num_cce_lp+1] = num_cce_p[0+:lg_num_cce_lp+1];
-          e_src_lce_assoc: src_a[0+:lg_lce_assoc_lp+1] = lce_assoc_p[0+:lg_lce_assoc_lp+1];
-          e_src_num_wg: src_a[0+:lg_num_way_groups_lp+1] = num_way_groups_lp[0+:lg_num_way_groups_lp+1];
-          e_src_lce_req_v: src_a[0] = lce_req_v_i;
-          e_src_mem_resp_v: src_a[0] = mem_resp_v_i;
-          e_src_pending_v: src_a = '0; // TODO: v2
-          e_src_lce_resp_v: src_a[0] = lce_resp_v_i;
-          e_src_lce_resp_type: src_a[0+:$bits(bp_lce_cce_resp_type_e)] = lce_resp_li.msg_type;
-          e_src_special_0: src_a[0] = 1'b0;
-          e_src_special_1: src_a[0] = 1'b1;
-          e_src_cce_id: src_a[0+:lg_num_cce_lp] = cfg_bus_cast_i.cce_id;
-          e_src_special_imm: src_a = decoded_inst_lo.imm;
-          default: src_a = '0;
-        endcase
-      end
-      default: src_a = '0;
-    endcase // src_a
-
-
-    // ALU operand b select
-    src_b = '0;
-    case (decoded_inst_lo.src_b_sel)
-      e_src_sel_gpr: begin
-        case (decoded_inst_lo.src_b.gpr)
-          e_src_r0: src_b = gpr_r_lo[e_gpr_r0];
-          e_src_r1: src_b = gpr_r_lo[e_gpr_r1];
-          e_src_r2: src_b = gpr_r_lo[e_gpr_r2];
-          e_src_r3: src_b = gpr_r_lo[e_gpr_r3];
-          e_src_r4: src_b = gpr_r_lo[e_gpr_r4];
-          e_src_r5: src_b = gpr_r_lo[e_gpr_r5];
-          e_src_r6: src_b = gpr_r_lo[e_gpr_r6];
-          e_src_r7: src_b = gpr_r_lo[e_gpr_r7];
-          e_src_gpr_imm: src_b = decoded_inst_lo.imm;
-          default: src_b = '0;
-        endcase
-      end
-      e_src_sel_flag: begin
-        case (decoded_inst_lo.src_b.flag)
-          e_src_rqf: src_b[0] = mshr.flags[e_flag_sel_rqf];
-          e_src_ucf: src_b[0] = mshr.flags[e_flag_sel_ucf];
-          e_src_nerf: src_b[0] = mshr.flags[e_flag_sel_nerf];
-          e_src_ldf: src_b[0] = mshr.flags[e_flag_sel_ldf];
-          e_src_pf: src_b[0] = mshr.flags[e_flag_sel_pf];
-          e_src_lef: src_b[0] = mshr.flags[e_flag_sel_lef];
-          e_src_cf: src_b[0] = mshr.flags[e_flag_sel_cf];
-          e_src_cef: src_b[0] = mshr.flags[e_flag_sel_cef];
-          e_src_cof: src_b[0] = mshr.flags[e_flag_sel_cof];
-          e_src_cdf: src_b[0] = mshr.flags[e_flag_sel_cdf];
-          e_src_tf: src_b[0] = mshr.flags[e_flag_sel_tf];
-          e_src_rf: src_b[0] = mshr.flags[e_flag_sel_rf];
-          e_src_uf: src_b[0] = mshr.flags[e_flag_sel_uf];
-          e_src_if: src_b[0] = mshr.flags[e_flag_sel_if];
-          e_src_nwbf: src_b[0] = mshr.flags[e_flag_sel_nwbf];
-          e_src_sf: src_b[0] = mshr.flags[e_flag_sel_sf];
-          e_src_flag_and: src_b[0] = bf_and;
-          e_src_flag_nand: src_b[0] = ~bf_and;
-          e_src_flag_or: src_b[0] = bf_or;
-          e_src_flag_nor: src_b[0] = ~bf_or;
-          e_src_flag_imm: src_b = decoded_inst_lo.imm;
-          default: src_b = '0;
-        endcase
-      end
-      e_src_sel_special: begin
-        case (decoded_inst_lo.src_b.special)
-          e_src_sharers_hit_r0: src_b[0] = sharers_hits_r0;
-          e_src_sharers_way_r0: src_b[0+:lg_lce_assoc_lp] = sharers_ways_r0;
-          e_src_sharers_state_r0: src_b[0+:`bp_coh_bits] = sharers_coh_states_r0;
-          e_src_req_lce: src_b[0+:lg_num_lce_lp] = mshr.lce_id;
-          e_src_next_coh_state: src_b[0+:`bp_coh_bits] = mshr.next_coh_state;
-          e_src_coh_state: src_b[0+:`bp_coh_bits] = coh_state_r_lo;
-          e_src_num_lce: src_b[0+:lg_num_lce_lp+1] = num_lce_p[0+:lg_num_lce_lp+1];
-          e_src_req_addr: src_b[0+:paddr_width_p] = mshr.paddr;
-          e_src_num_cce: src_b[0+:lg_num_cce_lp+1] = num_cce_p[0+:lg_num_cce_lp+1];
-          e_src_lce_assoc: src_b[0+:lg_lce_assoc_lp+1] = lce_assoc_p[0+:lg_lce_assoc_lp+1];
-          e_src_num_wg: src_b[0+:lg_num_way_groups_lp+1] = num_way_groups_lp[0+:lg_num_way_groups_lp+1];
-          e_src_lce_req_v: src_b[0] = lce_req_v_i;
-          e_src_mem_resp_v: src_b[0] = mem_resp_v_i;
-          e_src_pending_v: src_b = '0; // TODO: v2
-          e_src_lce_resp_v: src_b[0] = lce_resp_v_i;
-          e_src_lce_resp_type: src_b[0+:$bits(bp_lce_cce_resp_type_e)] = lce_resp_li.msg_type;
-          e_src_special_0: src_b[0] = 1'b0;
-          e_src_special_1: src_b[0] = 1'b1;
-          e_src_cce_id: src_b[0+:lg_num_cce_lp] = cfg_bus_cast_i.cce_id;
-          e_src_special_imm: src_b = decoded_inst_lo.imm;
-          default: src_b = '0;
-        endcase
-      end
-      default: src_b = '0;
-    endcase // src_b
-
-  end
 
 endmodule
