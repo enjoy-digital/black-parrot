@@ -67,6 +67,7 @@ module bp_cce_src_sel
 
    // FU Select Outputs
    , output logic [paddr_width_p-1:0]            addr_o
+   , output logic                                addr_bypass_o
    , output logic [lce_id_width_p-1:0]           lce_o
    , output logic [lce_assoc_width_lp-1:0]       way_o
    , output logic [lce_assoc_width_lp-1:0]       lru_way_o
@@ -267,6 +268,14 @@ module bp_cce_src_sel
       e_mux_sel_addr_pending:  addr_o = '0;
       e_mux_sel_addr_0:        addr_o = '0;
       default:                 addr_o = '0;
+    endcase
+
+    // address bypass - only for GPR or constant 0 as source
+    unique case (addr_sel_i)
+      e_mux_sel_addr_r0, e_mux_sel_addr_r1, e_mux_sel_addr_r2, e_mux_sel_addr_r3
+      ,e_mux_sel_addr_r4, e_mux_sel_addr_r5, e_mux_sel_addr_r6, e_mux_sel_addr_r7
+      , e_mux_sel_addr_0:  addr_bypass_o = 1'b1;
+      default:             addr_bypass_o = 1'b0;
     endcase
 
     // lce_sel

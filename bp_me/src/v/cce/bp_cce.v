@@ -179,19 +179,40 @@ module bp_cce
   // From Source Selector to Execute
   logic [`bp_cce_inst_gpr_width-1:0]   src_a, src_b;
   logic [paddr_width_p-1:0]            addr_lo;
+  logic                                addr_bypass_lo;
   logic [lce_id_width_p-1:0]           lce_lo;
   logic [lce_assoc_width_lp-1:0]       way_lo, lru_way_lo;
   bp_coh_states_e                      state_lo;
 
+  // Arbitrated signals
+  // TODO: dir signals, others, etc.
+  logic                                pending_li;
+
   // From Directory
-  logic dir_busy_lo;
-  logic sharers_v_lo;
-  logic [num_lce_p-1:0] sharers_hits_lo;
+  logic                                dir_busy_lo;
+  logic                                sharers_v_lo;
+  logic [num_lce_p-1:0]                sharers_hits_lo;
   logic [num_lce_p-1:0][lce_assoc_width_lp-1:0] sharers_ways_lo;
-  bp_coh_states_e [num_lce_p-1:0] sharers_coh_states_lo;
-  logic dir_addr_v_lo, dir_lru_v_lo;
-  logic dir_lru_cached_excl_lo;
-  logic [paddr_width_p-1:0] dir_addr_lo, dir_lru_addr_lo;
+  bp_coh_states_e [num_lce_p-1:0]      sharers_coh_states_lo;
+  logic                                dir_addr_v_lo, dir_lru_v_lo;
+  logic                                dir_lru_cached_excl_lo;
+  logic [paddr_width_p-1:0]            dir_addr_lo, dir_lru_addr_lo;
+
+  // From Pending Bits
+  logic                                pending_lo;
+
+  // From GAD
+  logic [lce_assoc_width_lp-1:0]       gad_req_addr_way_lo;
+  logic                                gad_transfer_flag_lo;
+  logic [lce_id_width_p-1:0]           gad_owner_lce_lo;
+  logic [lce_assoc_width_lp-1:0]       gad_owner_way_lo;
+  logic                                gad_replacement_flag_lo;
+  logic                                gad_upgrade_flag_lo;
+  logic                                gad_invalidate_flag_lo;
+  logic                                gad_cached_flag_lo;
+  logic                                gad_cached_exclusive_flag_lo;
+  logic                                gad_cached_owned_flag_lo;
+  logic                                gad_cached_dirty_flag_lo;
 
   // From Register File
   bp_cce_mshr_s mshr_lo;
@@ -204,24 +225,11 @@ module bp_cce
 
 
 
-
   // TODO: From Branch, maybe unused
   logic                                branch_res_lo;
 
 
 
-
-  logic [lce_assoc_widthlp-1:0] gad_req_addr_way_lo;
-  logic gad_transfer_flag_lo;
-  logic [lce_id_width_p-1:0] gad_owner_lce_lo;
-  logic [lce_assoc_width_lp-1:0] gad_owner_way_lo;
-  logic gad_replacement_flag_lo;
-  logic gad_upgrade_flag_lo;
-  logic gad_invalidate_flag_lo;
-  logic gad_cached_flag_lo;
-  logic gad_cached_exclusive_flag_lo;
-  logic gad_cached_owned_flag_lo;
-  logic gad_cached_dirty_flag_lo;
 
 
   /*
@@ -307,7 +315,6 @@ module bp_cce
       ,.pc_o(branch_resolution_pc_lo)
       );
 
-
   // Source Select
   bp_cce_src_sel
     #(.bp_params_p(bp_params_p)
@@ -339,15 +346,109 @@ module bp_cce
       ,.src_a_o(src_a)
       ,.src_b_o(src_b)
       ,.addr_o(addr_lo)
+      ,.addr_bypass_o(addr_bypass_lo)
       ,.lce_o(lce_lo)
       ,.way_o(lru_way_lo)
       ,.state_o(state_lo)
       );
 
+  // TODO: arbitration unit
+  // 1. arbitrate and output directory inputs for writes (message or ucode)
+  // 2. arbitrate and output pending bit inputs for writes (message or ucode)
+  // 3. arbitrate and output speculative bit inputs for reads (message or ucode)
+  bp_cce_arbitration
+    #(
+      )
+    arbitration
+     (
+      );
 
 
+  // Directory
+  bp_cce_dir
+    #(.bp_params_p(bp_params_p)
+      )
+    directory
+     (.clk_i(clk_i)
+      ,.reset_i(reset_i)
+      // TODO: these inputs may also be set by message unit, for example when
+      // doing invalidations. They need to be replaced by signals from arbitration unit
+      ,.addr_i(addr_lo)
+      ,.addr_bypass_i(addr_bypass_lo)
+      ,.lce_i(lce_lo)
+      ,.way_i(way_lo)
+      ,.lru_way_i(lru_way_lo)
+      ,.coh_state_i(state_lo)
+      ,.cmd_i(decoded_inst_lo.dir_op)
+      ,.r_v_i(decoded_inst_lo.dir_r_v)
+      // TODO: arbitration for directory write
+      // this should be a single signal, coming from arbitration unit
+      ,.w_v_i(decoded_inst_lo.dir_w_v)
+      ,.busy_o(dir_busy_lo)
+      ,.sharers_v_o(sharers_v_lo)
+      ,.sharers_hits_o(sharers_hits_lo)
+      ,.sharers_ways_o(sharers_ways_lo)
+      ,.sharers_coh_states_o(sharers_coh_states_lo)
+      ,.lru_v_o(dir_lru_v_lo)
+      ,.lru_cached_excl_o(dir_lru_cached_excl_lo)
+      ,.lru_addr_o(dir_lru_addr_lo)
+      ,.addr_v_o(dir_addr_v_lo)
+      ,.addr_o(dir_addr_lo)
+      );
 
+  // Pending Bits
+  bp_cce_pending
+    #(.num_way_groups_p(num_way_groups_lp) // TODO: number of way groups managed by this CCE
+      ,.num_cce_p(num_cce_p)
+      ,.addr_width_p()
+     )
+    pending_bits
+     (.clk_i(clk_i)
+      ,.reset_i(reset_i)
+      ,.w_v_i(pending_w_v_li)
+      ,.w_addr_i()
+      ,.w_addr_bypass_hash_i()
+      ,.pending_i(pending_li)
+      ,.clear_i(decoded_inst_lo.pending_clear)
+      ,.r_v_i()
+      ,.r_addr_i()
+      ,.r_addr_bypass_hash_i()
+      ,.pending_o(pending_lo)
+      );
 
+  // GAD logic - auxiliary directory information logic
+  // TODO: double check these inputs and outputs
+  bp_cce_gad
+    #(.num_lce_p(num_lce_p)
+      ,.lce_assoc_p(lce_max_assoc_p)
+      )
+    gad
+     (.clk_i(clk_i)
+      ,.reset_i(reset_i)
+      ,.gad_v_i(decoded_inst_lo.gad_v)
+
+      ,.sharers_v_i(sharers_v_lo)
+      ,.sharers_hits_i(sharers_hits_lo)
+      ,.sharers_ways_i(sharers_ways_lo)
+      ,.sharers_coh_states_i(sharers_coh_states_lo)
+
+      ,.req_lce_i(lg_num_lce_lp'(mshr.lce_id))
+      ,.req_type_flag_i(mshr.flags[e_flag_sel_rqf])
+      ,.lru_dirty_flag_i(mshr.flags[e_flag_sel_ldf])
+      ,.lru_cached_excl_flag_i(mshr.flags[e_flag_sel_lef])
+
+      ,.req_addr_way_o(gad_req_addr_way_lo)
+      ,.transfer_flag_o(gad_transfer_flag_lo)
+      ,.transfer_lce_o(gad_transfer_lce_lo)
+      ,.transfer_way_o(gad_transfer_lce_way_lo)
+      ,.replacement_flag_o(gad_replacement_flag_lo)
+      ,.upgrade_flag_o(gad_upgrade_flag_lo)
+      ,.invalidate_flag_o(gad_invalidate_flag_lo)
+      ,.cached_flag_o(gad_cached_flag_lo)
+      ,.cached_exclusive_flag_o(gad_cached_exclusive_flag_lo)
+      ,.cached_owned_flag_o(gad_cached_owned_flag_lo)
+      ,.cached_dirty_flag_o(gad_cached_dirty_flag_lo)
+      );
 
   // Instruction Stall Detection
   // TODO: this logic must be fast. No long paths should exist and a stall needs to be detected based on the 
@@ -382,39 +483,7 @@ module bp_cce
       ,.stall_cnt_o(stall_cnt_lo)
       );
 
-  // Directory
-  // Pending Bits
-  // GAD
-  // Register File
-  // Special Register File
-  // Source Select Module
-  // -- what does this select for and feed?
-  // -- ALU, Branch?, Directory?, Pending Bits?
-  // Message Tx/Rx
-  // - Normal Mode Message Tx/Rx
-  // - Uncached Only Mode Message Tx/Rx
 
-
-  // Pending Bits
-  logic pending_li, pending_lo;
-  bp_cce_pending
-    #(.num_way_groups_p(num_way_groups_lp) // TODO: number of way groups managed by this CCE
-      ,.num_cce_p(num_cce_p)
-      ,.addr_width_p()
-     )
-    pending_bits
-     (.clk_i(clk_i)
-      ,.reset_i(reset_i)
-      ,.w_v_i(pending_w_v_li)
-      ,.w_addr_i()
-      ,.w_addr_bypass_hash_i()
-      ,.pending_i(pending_li)
-      ,.clear_i(decoded_inst_lo.pending_clear)
-      ,.r_v_i()
-      ,.r_addr_i()
-      ,.r_addr_bypass_hash_i()
-      ,.pending_o(pending_lo)
-      );
 
 
 
@@ -467,80 +536,7 @@ module bp_cce
   logic [lg_lce_assoc_lp-1:0]                    inv_dir_way_lo;
 
 
-  // Directory
-  bp_cce_dir
-    #(.sets_p(num_way_groups_lp)
-      ,.num_lce_p(num_lce_p)
-      ,.lce_assoc_p(lce_assoc_p)
-      ,.tag_width_p(tag_width_lp)
-      )
-    directory
-     (.clk_i(clk_i)
-      ,.reset_i(reset_i)
 
-      ,.set_i(dir_set_li[0+:lg_num_way_groups_lp])
-      ,.lce_i(dir_lce_li)
-      ,.way_i(dir_way_li)
-      ,.lru_way_i(mshr.lru_way_id)
-
-      ,.r_cmd_i(decoded_inst_lo.dir_op)
-      ,.r_v_i(decoded_inst_lo.dir_r_v)
-
-      ,.tag_i(dir_tag_li)
-      ,.coh_state_i(dir_coh_state_li)
-
-      ,.w_cmd_i(decoded_inst_lo.dir_op)
-      ,.w_v_i(decoded_inst_lo.dir_w_v | msg_dir_w_v_lo)
-      ,.w_clr_row_i('0)
-
-      ,.sharers_v_o(sharers_v_lo)
-      ,.sharers_hits_o(sharers_hits_lo)
-      ,.sharers_ways_o(sharers_ways_lo)
-      ,.sharers_coh_states_o(sharers_coh_states_lo)
-
-      ,.lru_v_o(dir_lru_v_lo)
-      ,.lru_cached_excl_o(dir_lru_cached_excl_lo)
-      ,.lru_tag_o(dir_lru_tag_lo)
-
-      ,.busy_o(dir_busy_lo)
-
-      ,.tag_o(dir_tag_lo)
-
-      );
-
-  // GAD logic - auxiliary directory information logic
-  bp_cce_gad
-    #(.num_lce_p(num_lce_p)
-      ,.lce_assoc_p(lce_max_assoc_p)
-      )
-    gad
-     (.clk_i(clk_i)
-      ,.reset_i(reset_i)
-      ,.gad_v_i(decoded_inst_lo.gad_v)
-
-      ,.sharers_v_i(sharers_v_lo)
-      ,.sharers_hits_i(sharers_hits_lo)
-      ,.sharers_ways_i(sharers_ways_lo)
-      ,.sharers_coh_states_i(sharers_coh_states_lo)
-
-      ,.req_lce_i(lg_num_lce_lp'(mshr.lce_id))
-      ,.req_type_flag_i(mshr.flags[e_flag_sel_rqf])
-      ,.lru_dirty_flag_i(mshr.flags[e_flag_sel_ldf])
-      ,.lru_cached_excl_flag_i(mshr.flags[e_flag_sel_lef])
-
-      ,.req_addr_way_o(gad_req_addr_way_lo)
-
-      ,.transfer_flag_o(gad_transfer_flag_lo)
-      ,.transfer_lce_o(gad_transfer_lce_lo)
-      ,.transfer_way_o(gad_transfer_lce_way_lo)
-      ,.replacement_flag_o(gad_replacement_flag_lo)
-      ,.upgrade_flag_o(gad_upgrade_flag_lo)
-      ,.invalidate_flag_o(gad_invalidate_flag_lo)
-      ,.cached_flag_o(gad_cached_flag_lo)
-      ,.cached_exclusive_flag_o(gad_cached_exclusive_flag_lo)
-      ,.cached_owned_flag_o(gad_cached_owned_flag_lo)
-      ,.cached_dirty_flag_o(gad_cached_dirty_flag_lo)
-      );
 
   // Registers
   bp_cce_reg
