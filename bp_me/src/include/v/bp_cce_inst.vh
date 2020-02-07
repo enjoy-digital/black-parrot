@@ -501,7 +501,6 @@ typedef enum logic [3:0] {
   ,e_mux_sel_way_mshr_owner              = 4'b1001
   ,e_mux_sel_way_mshr_lru                = 4'b1010
   ,e_mux_sel_way_sh_way                  = 4'b1011 // Sharer's vector ways, indexed by src_a
-  ,e_mux_sel_way_gad                     = 4'b1100
   ,e_mux_sel_way_0                       = 4'b1111 // constant 0
 } bp_cce_inst_mux_sel_way_e;
 

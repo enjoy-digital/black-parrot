@@ -191,6 +191,7 @@ module bp_cce_reg
       // Flags
 
       case (decoded_inst_i.rqf_sel)
+      // TODO: this is a bug, lce_req.msg_type is more than 1 bit wide
         e_rqf_lce_req: begin
           mshr_n.flags[e_flag_sel_rqf] = lce_req.msg_type;
         end

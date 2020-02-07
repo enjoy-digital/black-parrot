@@ -4,13 +4,14 @@
  *   bp_cce_src_sel.v
  *
  * Description:
- *   Source select module for inputs to ALU and Branch units.
+ *   Source select module for inputs to ALU, Branch unit, directory, GAD, messages, etc.
+ *   This module encapsulates common selection/mux logic so it isn't scattered
+ *   about the top level CCE module.
+ *
+ *   It generates src_a, src_b, addr, lce, way, lru_way, and state signals.
  *
  *
  */
-
-// TODO: include both src_a and src_b in this module
-// For example, need both sources available when selecting from sharers vectors
 
 module bp_cce_src_sel
   import bp_common_pkg::*;
@@ -31,11 +32,11 @@ module bp_cce_src_sel
    , input bp_cce_inst_src_u                     src_b_i
 
    // Select signals for functional unit inputs (directory, gad, pending, message, etc.)
-   , input bp_cce_inst_mux_sel_addr_e            addr_sel
-   , input bp_cce_inst_mux_sel_lce_e             lce_sel
-   , input bp_cce_inst_mux_sel_way_e             way_sel
-   , input bp_cce_inst_mux_sel_way_e             lru_way_sel
-   , input bp_cce_inst_mux_sel_coh_state_e       coh_state_sel
+   , input bp_cce_inst_mux_sel_addr_e            addr_sel_i
+   , input bp_cce_inst_mux_sel_lce_e             lce_sel_i
+   , input bp_cce_inst_mux_sel_way_e             way_sel_i
+   , input bp_cce_inst_mux_sel_way_e             lru_way_sel_i
+   , input bp_cce_inst_mux_sel_coh_state_e       coh_state_sel_i
 
    // Data sources - from registered data and functional units
    , input [cfg_bus_width_lp-1:0]                                   cfg_bus_i
@@ -52,29 +53,6 @@ module bp_cce_src_sel
    , input                                                          lce_req_v_i
    , input bp_lce_cce_resp_type_e                                   lce_resp_type_i
    , input bp_cce_mem_cmd_type_e                                    mem_resp_type_i
-
-
-   // TODO: should these be here, or in the register file?
-   // Select signals for flags
-   , input bp_cce_inst_rqf_sel_e                 rqf_sel
-   , input bp_cce_inst_ucf_sel_e                 ucf_sel
-   , input bp_cce_inst_nerf_sel_e                nerf_sel
-   , input bp_cce_inst_ldf_sel_e                 ldf_sel
-   , input bp_cce_inst_pf_sel_e                  pf_sel
-   , input bp_cce_inst_lef_sel_e                 lef_sel
-   , input bp_cce_inst_cf_sel_e                  cf_sel
-   , input bp_cce_inst_cef_sel_e                 cef_sel
-   , input bp_cce_inst_cof_sel_e                 cof_sel
-   , input bp_cce_inst_cdf_sel_e                 cdf_sel
-   , input bp_cce_inst_tf_sel_e                  tf_sel
-   , input bp_cce_inst_rf_sel_e                  rf_sel
-   , input bp_cce_inst_uf_sel_e                  uf_sel
-   , input bp_cce_inst_if_sel_e                  if_sel
-   , input bp_cce_inst_nwbf_sel_e                nwbf_sel
-   , input bp_cce_inst_sf_sel_e                  sf_sel
-
-
-
 
    // Source A and B outputs
    , output logic [`bp_cce_inst_gpr_width-1:0]   src_a_o
@@ -146,8 +124,6 @@ module bp_cce_src_sel
           e_opd_flags:          src_a_o[0+:`bp_cce_inst_num_flags] = mshr.flags;
           e_opd_uc_req_size:    src_a_o[0+:$bits(bp_lce_cce_uc_req_size_e)] = mshr.uc_req_size;
           e_opd_data_length:    src_a_o[0+:$bits(bp_lce_cce_data_length_e)] = mshr.data_length;
-          // TODO: correct? If sh_x[GPR] is the source, the index used comes from interpreting
-          // src_b as a GPR
           e_opd_sharers_hit:    src_a_o[0] = sharers_hits_i[gpr_i[src_b_i.gpr[0+:`bp_cce_inst_gpr_sel_width]]];
           e_opd_sharers_way:    src_a_o[0+:lce_assoc_width_lp] = sharers_ways_i[gpr_i[src_b_i.gpr[0+:`bp_cce_inst_gpr_sel_width]]];
           e_opd_sharers_state:  src_a_o[0+:`bp_coh_bits] = sharers_coh_states_i;[gpr_i[src_b_i.gpr[0+:`bp_cce_inst_gpr_sel_width]]]
@@ -180,7 +156,7 @@ module bp_cce_src_sel
         src_a_o = imm_i;
       end
       default: src_a_o = '0;
-    end
+    end // src_a
 
     src_b_o = '0;
     unique case (src_b_sel_i)
@@ -231,6 +207,10 @@ module bp_cce_src_sel
           e_opd_flags:          src_b_o[0+:`bp_cce_inst_num_flags] = mshr.flags;
           e_opd_uc_req_size:    src_b_o[0+:$bits(bp_lce_cce_uc_req_size_e)] = mshr.uc_req_size;
           e_opd_data_length:    src_b_o[0+:$bits(bp_lce_cce_data_length_e)] = mshr.data_length;
+          // Sharers vectors as source b is not supported
+          //e_opd_sharers_hit:
+          //e_opd_sharers_way:
+          //e_opd_sharers_state:
           default:              src_b_o = '0;
         endcase
       end
@@ -260,21 +240,99 @@ module bp_cce_src_sel
         src_b_o = imm_i;
       end
       default: src_b_o = '0;
-    end
+    end //src_b
 
-  end // src_a and src_b
+    // addr_sel
+    unique case (addr_sel_i)
+      e_mux_sel_addr_r0:       addr_o = gpr_i[e_opd_r0[0+:paddr_width_p]];
+      e_mux_sel_addr_r1:       addr_o = gpr_i[e_opd_r1[0+:paddr_width_p]];
+      e_mux_sel_addr_r2:       addr_o = gpr_i[e_opd_r2[0+:paddr_width_p]];
+      e_mux_sel_addr_r3:       addr_o = gpr_i[e_opd_r3[0+:paddr_width_p]];
+      e_mux_sel_addr_r4:       addr_o = gpr_i[e_opd_r4[0+:paddr_width_p]];
+      e_mux_sel_addr_r5:       addr_o = gpr_i[e_opd_r5[0+:paddr_width_p]];
+      e_mux_sel_addr_r6:       addr_o = gpr_i[e_opd_r6[0+:paddr_width_p]];
+      e_mux_sel_addr_r7:       addr_o = gpr_i[e_opd_r7[0+:paddr_width_p]];
+      e_mux_sel_addr_mshr_req: addr_o = mshr.paddr;
+      e_mux_sel_addr_mshr_lru: addr_o = mshr.lru_paddr;
+      e_mux_sel_addr_lce_req:  addr_o = lce_req.addr;
+      e_mux_sel_addr_lce_resp: addr_o = lce_resp.addr;
+      e_mux_sel_addr_mem_resp: addr_o = mem_resp.addr;
+      e_mux_sel_addr_pending:  addr_o = '0;
+      e_mux_sel_addr_0:        addr_o = '0;
+      default:                 addr_o = '0;
+    endcase
 
-// TODO: mux selects
-  // addr_sel
+    // lce_sel
+    unique case (lce_sel_i)
+      e_mux_sel_lce_r0:         lce_o = gpr_i[e_opd_r0[0+:lce_id_width_p]];
+      e_mux_sel_lce_r1:         lce_o = gpr_i[e_opd_r1[0+:lce_id_width_p]];
+      e_mux_sel_lce_r2:         lce_o = gpr_i[e_opd_r2[0+:lce_id_width_p]];
+      e_mux_sel_lce_r3:         lce_o = gpr_i[e_opd_r3[0+:lce_id_width_p]];
+      e_mux_sel_lce_r4:         lce_o = gpr_i[e_opd_r4[0+:lce_id_width_p]];
+      e_mux_sel_lce_r5:         lce_o = gpr_i[e_opd_r5[0+:lce_id_width_p]];
+      e_mux_sel_lce_r6:         lce_o = gpr_i[e_opd_r6[0+:lce_id_width_p]];
+      e_mux_sel_lce_r7:         lce_o = gpr_i[e_opd_r7[0+:lce_id_width_p]];
+      e_mux_sel_lce_mshr_req:   lce_o = mshr.lce_id;
+      e_mux_sel_lce_mshr_owner: lce_o = mshr.owner_lce_id;
+      e_mux_sel_lce_lce_req:    lce_o = lce_req.src_id;
+      e_mux_sel_lce_lce_resp:   lce_o = lce_resp.src_id;
+      e_mux_sel_lce_mem_resp:   lce_o = mem_resp.payload.lce_id;
+      e_mux_sel_lce_pending:    lce_o = '0;
+      e_mux_sel_lce_0:          lce_o = '0;
+      default:                  lce_o = '0;
+    endcase
 
-  // lce_sel
+    // way_sel
+    unique case (way_sel_i)
+      e_mux_sel_way_r0:         way_o = gpr_i[e_opd_r0[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r1:         way_o = gpr_i[e_opd_r1[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r2:         way_o = gpr_i[e_opd_r2[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r3:         way_o = gpr_i[e_opd_r3[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r4:         way_o = gpr_i[e_opd_r4[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r5:         way_o = gpr_i[e_opd_r5[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r6:         way_o = gpr_i[e_opd_r6[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r7:         way_o = gpr_i[e_opd_r7[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_mshr_req:   way_o = mshr.way_id;
+      e_mux_sel_way_mshr_owner: way_o = mshr.owner_way_id;
+      e_mux_sel_way_mshr_lru:   way_o = mshr.lru_way_id;
+      e_mux_sel_way_sh_way:     way_o = sharers_ways_i[gpr_i[src_a_i.gpr[0+:`bp_cce_inst_gpr_sel_width]]];
+      e_mux_sel_way_0:          way_o = '0;
+      default:                  way_o = '0;
+    endcase
 
-  // way_sel
+    // lru_way_sel
+    unique case (lru_way_sel_i)
+      e_mux_sel_way_r0:         lru_way_o = gpr_i[e_opd_r0[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r1:         lru_way_o = gpr_i[e_opd_r1[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r2:         lru_way_o = gpr_i[e_opd_r2[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r3:         lru_way_o = gpr_i[e_opd_r3[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r4:         lru_way_o = gpr_i[e_opd_r4[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r5:         lru_way_o = gpr_i[e_opd_r5[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r6:         lru_way_o = gpr_i[e_opd_r6[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_r7:         lru_way_o = gpr_i[e_opd_r7[0+:lce_assoc_width_lp]];
+      e_mux_sel_way_mshr_req:   lru_way_o = mshr.way_id;
+      e_mux_sel_way_mshr_owner: lru_way_o = mshr.owner_way_id;
+      e_mux_sel_way_mshr_lru:   lru_way_o = mshr.lru_way_id;
+      e_mux_sel_way_sh_way:     lru_way_o = sharers_ways_i[gpr_i[src_a_i.gpr[0+:`bp_cce_inst_gpr_sel_width]]];
+      e_mux_sel_way_0:          lru_way_o = '0;
+      default:                  lru_way_o = '0;
+    endcase
 
-  // lru_way_sel
+    // coh_state_sel
+    unique case (state_sel_i)
+      e_mux_sel_coh_r0:             state_o = gpr_i[e_opd_r0[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r1:             state_o = gpr_i[e_opd_r1[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r2:             state_o = gpr_i[e_opd_r2[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r3:             state_o = gpr_i[e_opd_r3[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r4:             state_o = gpr_i[e_opd_r4[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r5:             state_o = gpr_i[e_opd_r5[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r6:             state_o = gpr_i[e_opd_r6[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_r7:             state_o = gpr_i[e_opd_r7[0+:$bits(bp_coh_states_e)]];
+      e_mux_sel_coh_next_coh_state: state_o = mshr.next_coh_state;
+      e_mux_sel_coh_inst_imm:       state_o = imm_i[0+:$bits(bp_coh_states_e)];
+      default:                      state_o = '0;
+    endcase
 
-  // coh_state_sel
-
-
+  end // always_comb
 
 endmodule
