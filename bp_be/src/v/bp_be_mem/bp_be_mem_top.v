@@ -182,7 +182,7 @@ bsg_dff_en
    ,.data_o({fault_vaddr, fault_pc})
    );
 
-wire is_store = mmu_cmd_v_i & mmu_cmd.mem_op inside {e_sb, e_sh, e_sw, e_sd};
+wire is_store = mmu_cmd_v_i & mmu_cmd.mem_op inside {e_sb, e_sh, e_sw, e_sd, e_scw, e_scd};
 
 bsg_dff_chain
  #(.width_p(vaddr_width_p)
@@ -197,7 +197,6 @@ bsg_dff_chain
 
 bp_be_ecode_dec_s exception_ecode_dec_li;
 
-wire bubble_v_li    = commit_pkt.bubble_v;
 wire exception_v_li = commit_pkt.v | ptw_page_fault_v;
 wire [vaddr_width_p-1:0] exception_pc_li = ptw_page_fault_v ? fault_pc : commit_pkt.pc;
 wire [vaddr_width_p-1:0] exception_npc_li = commit_pkt.npc;
@@ -244,7 +243,6 @@ bp_be_csr
    ,.hartid_i(cfg_bus.core_id)
    ,.instret_i(commit_pkt.instret)
 
-   ,.bubble_v_i(bubble_v_li)
    ,.exception_v_i(exception_v_li)
    ,.exception_pc_i(exception_pc_li)
    ,.exception_npc_i(exception_npc_li)
@@ -453,8 +451,11 @@ end
 
 // Fault if in uncached mode but access is not for an uncached address
 wire is_uncached_mode = (cfg_bus.dcache_mode == e_lce_mode_uncached);
-assign load_access_fault_v  = is_uncached_mode & (load_op_tl_lo & ~dcache_uncached);
-assign store_access_fault_v = is_uncached_mode & (store_op_tl_lo & ~dcache_uncached);
+wire mode_fault_v = (is_uncached_mode & ~dcache_uncached);
+  // TODO: Enable other domains by setting enabled dids with cfg_bus
+wire did_fault_v = (dcache_ptag[ptag_width_p-1-:io_noc_did_width_p] != '0);
+assign load_access_fault_v  = load_op_tl_lo & (mode_fault_v | did_fault_v);
+assign store_access_fault_v = store_op_tl_lo & (mode_fault_v | did_fault_v);
 
 // D-TLB connections
 assign dtlb_r_v     = dcache_cmd_v;
@@ -482,9 +483,13 @@ assign itlb_fill_vaddr_o = fault_vaddr;
 assign itlb_fill_entry_o = ptw_tlb_w_entry;
 
 // synopsys translate_off
+bp_be_mmu_cmd_s mmu_cmd_r;
+always_ff @(posedge clk_i)
+  mmu_cmd_r <= mmu_cmd;
+
 always_ff @(negedge clk_i)
   begin
-    assert (~(dtlb_r_v_lo & dcache_uncached & mmu_cmd.mem_op inside {e_lrw, e_lrd, e_scw, e_scd}))
+    assert (~(mmu_cmd_v_r & dtlb_r_v_lo & dcache_uncached & (mmu_cmd_r.mem_op inside {e_lrw, e_lrd, e_scw, e_scd})))
       else $warning("LR/SC to uncached memory not supported");
   end
 // synopsys translate_on
